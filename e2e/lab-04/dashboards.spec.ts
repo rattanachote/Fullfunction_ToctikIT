@@ -6,7 +6,7 @@ test.describe("Dashboards E2E", () => {
 
     // Login as Admin
     await page.fill("input[type='email']", "john.smith@example.com");
-    await page.fill("input[type='password']", "Password123!");
+    await page.fill("input[type='password']", "password123");
     await page.click("button[type='submit']");
 
     // Check dashboard elements
@@ -25,11 +25,11 @@ test.describe("Dashboards E2E", () => {
     await page.goto("http://localhost:5173");
 
     // Login as Requester
-    await page.fill("input[type='email']", "alice.chen@example.com");
-    await page.fill("input[type='password']", "Password123!");
+    await page.fill("input[type='email']", "michael.b@example.com");
+    await page.fill("input[type='password']", "password123");
     await page.click("button[type='submit']");
 
-    await expect(page.locator("text=Welcome back, Alice Chen!")).toBeVisible();
+    await expect(page.locator("text=Welcome back, Michael Brown!")).toBeVisible();
     await expect(page.locator("text=All Open Tickets")).toBeVisible();
     await expect(page.locator("text=Waiting for My Reply")).toBeVisible();
     await expect(page.locator("text=My Recent Tickets")).toBeVisible();

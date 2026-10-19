@@ -6,7 +6,7 @@ test.describe("Actions Taken Flow E2E", () => {
 
     // Login as IT Staff / Admin
     await page.fill("input[type='email']", "john.smith@example.com");
-    await page.fill("input[type='password']", "Password123!");
+    await page.fill("input[type='password']", "password123");
     await page.click("button[type='submit']");
 
     // Navigate to Queue
@@ -20,25 +20,25 @@ test.describe("Actions Taken Flow E2E", () => {
     await expect(page.locator("button:has-text('Record Action')")).toBeVisible();
 
     // Record a new Action Taken
-    await page.fill("textarea[placeholder*='Describe the technical step']", "Verified network switch port configuration and reset VLAN tagging.");
-    await page.fill("input[placeholder*='Fixed']", "Port connectivity restored.");
+    await page.fill("textarea[placeholder*='Record action taken description']", "Verified network switch port configuration and reset VLAN tagging.");
+    await page.fill("input[placeholder*='Result']", "Port connectivity restored.");
     await page.click("button:has-text('Record Action')");
 
     await expect(page.locator("text=Verified network switch port configuration and reset VLAN tagging.")).toBeVisible();
 
     // Edit the recorded Action Taken inline
-    await page.click("button[aria-label^='Edit action']:first-of-type");
-    await page.fill("input[aria-label='Edit Action Result']", "Confirmed stable link with user.");
-    await page.click("button:has-text('Save Changes')");
+    await page.click("button:has-text('Edit'):first-of-type");
+    await page.fill("input[placeholder='Result...']", "Confirmed stable link with user.");
+    await page.click("button:has-text('Save Action')");
     await expect(page.locator("text=Confirmed stable link with user.")).toBeVisible();
   });
 
   test("allows Requester to view Actions Taken read-only while hiding Internal Notes", async ({ page }) => {
     await page.goto("http://localhost:5173");
 
-    // Login as Requester (Alice Chen)
-    await page.fill("input[type='email']", "alice.chen@example.com");
-    await page.fill("input[type='password']", "Password123!");
+    // Login as Requester (Michael Brown)
+    await page.fill("input[type='email']", "michael.b@example.com");
+    await page.fill("input[type='password']", "password123");
     await page.click("button[type='submit']");
 
     // Navigate to My Tickets

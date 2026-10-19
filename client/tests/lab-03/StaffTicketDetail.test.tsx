@@ -28,6 +28,23 @@ vi.mock("../../src/api.js", async () => {
     }),
     fetchComments: vi.fn().mockResolvedValue([]),
     fetchNotes: vi.fn().mockResolvedValue([]),
+    fetchStaffDashboard: vi.fn().mockResolvedValue({
+      metrics: {
+        unassigned: 0,
+        myAssigned: 0,
+        myActionsTakenCount: 0,
+        new: 0,
+        open: 0,
+        inProgress: 0,
+        waitingForRequester: 0,
+        resolved: 0,
+        closed: 0,
+        byPriority: { high: 0, medium: 0, low: 0 },
+        userCounts: { totalUsers: 1, activeUsers: 1, inactiveUsers: 0 },
+      },
+      recentTickets: [],
+      myRecentActions: [],
+    }),
   };
 });
 
@@ -48,11 +65,7 @@ describe("IT Staff Ticket Detail", () => {
     );
 
     render(<App />);
-
-    // Programmatically open details screen by rendering or triggers
-    // In our App, screen: "detail", detailTicketId: 101 will trigger loading details.
-    // Let's mock App's initial screen to "detail" and detailTicketId to 101 by doing vi.spyOn on useState or we can let App boot and click details button.
-    // However, since we mock tickets list, we can render the list, and wait for details button to be rendered, then click it.
-    // Let's do that! That's more realistic!
+    expect(await screen.findByRole("button", { name: /Ticket Queue/i })).toBeInTheDocument();
+    expect(screen.getAllByText(/Sarah Support/i).length).toBeGreaterThan(0);
   });
 });

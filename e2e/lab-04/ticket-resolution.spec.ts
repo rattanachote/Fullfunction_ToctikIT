@@ -5,18 +5,18 @@ test.describe("Ticket Resolution E2E", () => {
     await page.goto("http://localhost:5173");
 
     // 1. Login as Requester and indicate issue is resolved
-    await page.fill("input[type='email']", "alice.chen@example.com");
-    await page.fill("input[type='password']", "Password123!");
+    await page.fill("input[type='email']", "michael.b@example.com");
+    await page.fill("input[type='password']", "password123");
     await page.click("button[type='submit']");
 
     await page.click("button:has-text('My Tickets')");
     await page.click("button:has-text('Details'):first-of-type");
     await expect(page.locator("text=Actions Taken (Work Tracker)")).toBeVisible();
-    await page.click("button:has-text('Sign Out')");
+    await page.click("button:has-text('Logout')");
 
     // 2. Login as IT Staff / Admin and formally update status
     await page.fill("input[type='email']", "john.smith@example.com");
-    await page.fill("input[type='password']", "Password123!");
+    await page.fill("input[type='password']", "password123");
     await page.click("button[type='submit']");
 
     await page.click("button:has-text('Ticket Queue')");
