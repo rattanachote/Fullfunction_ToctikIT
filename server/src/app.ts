@@ -1419,6 +1419,39 @@ if (fs.existsSync(path.join(CLIENT_DIST_DIR, "index.html"))) {
     }
     res.sendFile(path.join(CLIENT_DIST_DIR, "index.html"));
   });
+} else {
+  app.get("/", (_req, res) => {
+    res.send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <title>TokTickIT Backend API</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; justify-content: center; align-items: center; min-height: 100vh; margin: 0; background-color: #f5f7f6; color: #1c2e24; }
+          .card { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); text-align: center; max-width: 540px; }
+          h1 { color: #15803d; font-size: 1.75rem; margin-bottom: 0.5rem; }
+          p { color: #4b5563; font-size: 1rem; line-height: 1.5; }
+          .btn { display: inline-block; margin-top: 1rem; padding: 0.75rem 1.5rem; background-color: #15803d; color: white; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 1rem; }
+          .badge { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 0.25rem 0.5rem; border-radius: 4px; font-size: 0.85rem; font-weight: 600; }
+          .api-links { margin-top: 1.5rem; font-size: 0.9rem; color: #6b7280; }
+          .api-links a { color: #15803d; text-decoration: none; }
+        </style>
+      </head>
+      <body>
+        <div class="card">
+          <h1>TokTickIT API Server</h1>
+          <p><span class="badge">Backend Port 3000 Active</span></p>
+          <p>You have accessed the <strong>Backend REST API</strong>. The web application interface (Frontend) is running on port <strong>5173</strong>.</p>
+          <a href="http://localhost:5173" class="btn">👉 Go to TokTickIT Web App (Port 5173)</a>
+          <div class="api-links">
+            API Health: <a href="/api/health">/api/health</a> &bull; Categories: <a href="/api/categories">/api/categories</a>
+          </div>
+        </div>
+      </body>
+      </html>
+    `);
+  });
 }
 
 export default app;
