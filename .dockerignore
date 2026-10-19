@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/build
+**/.env
+*.log
+.git
+.gitignore
+test-results
+playwright-report
+server/uploads/*
+!server/uploads/.gitkeep
