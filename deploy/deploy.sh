@@ -221,10 +221,15 @@ run_cmd gcloud run jobs deploy "$MIGRATE_JOB_NAME" \
   --task-timeout 300s \
   --project "$PROJECT_ID"
 
-run_cmd gcloud run jobs execute "$MIGRATE_JOB_NAME" \
+if ! run_cmd gcloud run jobs execute "$MIGRATE_JOB_NAME" \
   --region "$REGION" \
   --wait \
-  --project "$PROJECT_ID"
+  --project "$PROJECT_ID"; then
+  printf '%s\n' "ERROR: Cloud Run migration job '${MIGRATE_JOB_NAME}' failed. Aborting service deployment." >&2
+  printf '%s\n' "View job logs with:" >&2
+  printf '%s\n' "  gcloud logging read \"resource.type=cloud_run_job AND resource.labels.job_name=${MIGRATE_JOB_NAME}\" --project \"${PROJECT_ID}\" --limit 50 --format=\"value(textPayload)\"" >&2
+  exit 1
+fi
 
 # 11. Deploy Cloud Run Service
 run_cmd gcloud run deploy "$SERVICE_NAME" \
