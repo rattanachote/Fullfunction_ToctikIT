@@ -46,38 +46,93 @@ npm run dev            # Starts Vite UI on http://localhost:5173
 ```
 
 ### Docker Deployment (`docker-compose.yml` & `Dockerfile`)
-You can build and run the entire full-stack application (PostgreSQL 16 + Express/Prisma API + React/Nginx Frontend) with a single command:
+You can build and run the entire full-stack application (PostgreSQL 16 + one-shot Prisma Migration/Seed + Express/Prisma API + React/Nginx Frontend) with a single command:
 
 ```bash
-# Option A: Full-Stack Multi-Container (PostgreSQL + API + Nginx Frontend)
+# Option A: Full-Stack Multi-Container (PostgreSQL + One-Shot Migrate + API + Nginx Frontend)
 docker compose up --build -d
 # -> Frontend UI: http://localhost:5173
 # -> Backend API: http://localhost:3000/api/health
+# -> Readiness  : http://localhost:3000/api/ready
 
-# Option B: Unified Single-Container Build (for Render / Railway / Fly.io / Cloud Run)
+# Option B: Unified Single-Container Build (for Cloud Run / Render / Railway / Fly.io)
 docker build -t toktickit-lab4 .
-docker run -p 3000:3000 -e DATABASE_URL="postgresql://toktickit:toktickit@host.docker.internal:5432/toktickit?schema=public" toktickit-lab4
+docker run -p 3000:3000 -e DATABASE_URL="postgresql://<user>:<pass>@host.docker.internal:5432/toktickit?schema=public" toktickit-lab4
 # -> Unified UI + API: http://localhost:3000
 ```
 
 ---
 
-## 3. Seeded Demo Accounts (`npm run prisma:seed`)
+## 3. Google Cloud Run Deployment (`deploy/deploy.sh` & `deploy/teardown.sh`)
 
-All seeded accounts use the password: **`password123`**
+The repository includes an idempotent deployment script for **Google Cloud Run + Cloud SQL for PostgreSQL + Secret Manager** designed to be executed directly inside **Google Cloud Shell**.
 
-| Role | Name | Email | Account State |
+### Step-by-Step Deployment in Google Cloud Shell (<= 5 Steps)
+
+1. **Open Google Cloud Shell** in the [Google Cloud Console](https://console.cloud.google.com/) and select your GCP project (make sure Billing is enabled on the project):
+   ```bash
+   gcloud config set project YOUR_PROJECT_ID
+   ```
+2. **Clone the repository and enter the folder:**
+   ```bash
+   git clone https://github.com/rattanachote/Fullfunction_ToctikIT.git
+   cd Fullfunction_ToctikIT
+   ```
+3. **(Optional) Preview all `gcloud` commands with `DRY_RUN=1`:**
+   ```bash
+   DRY_RUN=1 bash ./deploy/deploy.sh
+   ```
+4. **Run the deployment script:**
+   - **Production mode** (seeds Categories, Related Systems, and Administrator only):
+     ```bash
+     bash ./deploy/deploy.sh
+     ```
+   - **Demo mode** (also seeds demo Requester/ITStaff users and sample tickets with a randomly generated password):
+     ```bash
+     bash ./deploy/deploy.sh --demo
+     ```
+5. **Sign in & Change Initial Password:**
+   - Open the printed **Service URL** (`https://toktickit-...a.run.app`).
+   - Sign in as `john.smith@example.com` using the randomly generated `Admin Password` printed at the end of `deploy.sh` (or retrieve it anytime via `gcloud secrets versions access latest --secret=toktickit-admin-password`).
+   - Because `mustChangePassword` is `true`, the system will immediately prompt you to set a new strong password.
+
+### Redeploying Safely (Zero Data Loss)
+To deploy new code changes, simply run `bash ./deploy/deploy.sh` again:
+- Existing secrets (`toktickit-database-url`, `toktickit-admin-password`) are preserved.
+- `prisma migrate deploy` applies only new migrations.
+- `seed.ts` detects existing users (`prisma.user.count() > 0`) and skips seeding so passwords, tickets, sessions (in the `Session` table), and file attachments (in the `AttachmentBlob` table) are never overwritten or lost.
+
+### Cost Estimate & How to Avoid Charges (`teardown.sh`)
+- **Cloud Run** scales to `0` instances when idle (`--min-instances=0 --max-instances=3`).
+- **Cloud SQL (`db-f1-micro`, 10 GB SSD)** runs continuously and costs approximately **USD 9–12 / month** while active (unless covered by GCP Free Trial credits).
+- **To stop all charges completely when finished testing**, run the teardown script to delete the Cloud Run Service, Cloud Run Job, Cloud SQL instance, Artifact Registry, and Secrets:
+  ```bash
+  bash ./deploy/teardown.sh
+  ```
+
+---
+
+## 4. Seeded Accounts (`npm run prisma:seed`)
+
+- **In Production (`NODE_ENV=production`):**
+  - Requires `ADMIN_PASSWORD` from the environment (no default fallback).
+  - Seeds only Categories, Related Systems, and the Administrator (`john.smith@example.com`) with `mustChangePassword: true`.
+  - If `SEED_DEMO_DATA=true` is set, demo accounts and sample tickets are also seeded using `DEMO_USER_PASSWORD` with `mustChangePassword: true`.
+- **In Local Development (`NODE_ENV != production`):**
+  - Uses local dev fallback password from `seed.ts` for local testing convenience.
+
+| Role | Name | Email | Production `mustChangePassword` |
 | :--- | :--- | :--- | :--- |
-| **Administrator** | John Smith | `john.smith@example.com` | Active (`mustChangePassword: false`) |
-| **IT Staff** | Sarah IT Support | `sarah.it@example.com` | Active (`mustChangePassword: false`) |
-| **IT Staff** | John Support | `john.s@example.com` | Active (`mustChangePassword: false`) |
-| **IT Staff** | Alice Staff | `alice.s@example.com` | Active (`mustChangePassword: false`) |
-| **IT Staff** | Inactive IT Staff | `inactive.it@example.com` | Inactive (`isActive: false`) |
-| **Requester** | Jennifer Anderson | `jennifer.a@example.com` | Active (`mustChangePassword: false`) |
-| **Requester** | Michael Brown | `michael.b@example.com` | Active (`mustChangePassword: false`) |
-| **Requester** | Sarah Johnson | `sarah.j@example.com` | Active (`mustChangePassword: false`) |
-| **Requester** | David Lee | `david.l@example.com` | Active (`mustChangePassword: true` — tests first-login password change) |
-| **Requester** | Inactive Test User | `inactive.user@example.com` | Inactive (`isActive: false`) |
+| **Administrator** | John Smith | `john.smith@example.com` | `true` |
+| **IT Staff** | Sarah IT Support | `sarah.it@example.com` | `true` (when `SEED_DEMO_DATA=true`) |
+| **IT Staff** | John Support | `john.s@example.com` | `true` (when `SEED_DEMO_DATA=true`) |
+| **IT Staff** | Alice Staff | `alice.s@example.com` | `true` (when `SEED_DEMO_DATA=true`) |
+| **IT Staff** | Inactive IT Staff | `inactive.it@example.com` | `true` (`isActive: false`) |
+| **Requester** | Jennifer Anderson | `jennifer.a@example.com` | `true` (when `SEED_DEMO_DATA=true`) |
+| **Requester** | Michael Brown | `michael.b@example.com` | `true` (when `SEED_DEMO_DATA=true`) |
+| **Requester** | Sarah Johnson | `sarah.j@example.com` | `true` (when `SEED_DEMO_DATA=true`) |
+| **Requester** | David Lee | `david.l@example.com` | `true` |
+| **Requester** | Inactive Test User | `inactive.user@example.com` | `true` (`isActive: false`) |
 
 The idempotent seed (`server/prisma/seed.ts`) populates **8 tickets (`TKT-YYYY-000001` – `TKT-YYYY-000008`)** spanning all 8 workflow statuses (`New`, `Open`, `In Progress`, `Waiting for Requester`, `Resolved`, `Closed`, `Reopened`, `Cancelled`), all priority levels (`HIGH`, `MEDIUM`, `LOW`), assigned and unassigned states, and tickets with **0, 1, and multiple Actions Taken** across multiple IT Staff members.
 
