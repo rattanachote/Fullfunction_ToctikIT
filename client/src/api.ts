@@ -143,15 +143,13 @@ export interface FetchTicketsResponse {
   pagination: Pagination;
 }
 
-const getHeaders = (requesterId?: number) => {
+const getHeaders = (_requesterId?: number) => {
   const headers: HeadersInit = {
     "Content-Type": "application/json",
   };
   const token = sessionStorage.getItem("auth_token");
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
-  } else if (requesterId) {
-    headers["X-Requester-Id"] = requesterId.toString();
   }
   return headers;
 };
@@ -523,7 +521,7 @@ export async function fetchStaffDashboard(): Promise<StaffDashboardData> {
 export async function uploadAttachment(
   ticketId: number,
   file: File,
-  requesterId?: number
+  _requesterId?: number
 ): Promise<Attachment> {
   const formData = new FormData();
   formData.append("file", file);
@@ -532,8 +530,6 @@ export async function uploadAttachment(
   const token = sessionStorage.getItem("auth_token");
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
-  } else if (requesterId) {
-    headers["X-Requester-Id"] = requesterId.toString();
   }
 
   const res = await fetch(`${API_URL}/api/tickets/${ticketId}/attachments`, {
@@ -568,14 +564,12 @@ export async function deleteAttachment(
 export async function downloadAttachment(
   id: number,
   originalName: string,
-  requesterId?: number
+  _requesterId?: number
 ): Promise<void> {
   const headers: HeadersInit = {};
   const token = sessionStorage.getItem("auth_token");
   if (token) {
     headers["Authorization"] = `Bearer ${token}`;
-  } else if (requesterId) {
-    headers["X-Requester-Id"] = requesterId.toString();
   }
 
   const res = await fetch(`${API_URL}/api/attachments/${id}`, {

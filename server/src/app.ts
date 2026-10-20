@@ -74,11 +74,14 @@ export const authenticate = async (
         return;
       }
       authenticatedUser = session;
-    } else if (xRequesterId) {
+    } else if (
+      xRequesterId &&
+      process.env.ALLOW_LEGACY_REQUESTER_HEADER === "true"
+    ) {
       const parsedId = parseInt(xRequesterId as string, 10);
       if (!isNaN(parsedId)) {
         const user = await getPrisma().user.findUnique({ where: { id: parsedId } });
-        if (user) {
+        if (user && user.role === "Requester") {
           authenticatedUser = {
             userId: user.id,
             email: user.email,

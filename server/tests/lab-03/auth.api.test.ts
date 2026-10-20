@@ -89,4 +89,29 @@ describe("Authentication API", () => {
       .set("Authorization", `Bearer ${token}`);
     expect(profileRes.status).toBe(401);
   });
+
+  it("rejects x-requester-id with 401 across all authenticated endpoints when ALLOW_LEGACY_REQUESTER_HEADER is disabled", async () => {
+    const prev = process.env.ALLOW_LEGACY_REQUESTER_HEADER;
+    process.env.ALLOW_LEGACY_REQUESTER_HEADER = "false";
+
+    try {
+      const endpoints = [
+        { method: "get" as const, path: "/api/auth/me" },
+        { method: "get" as const, path: "/api/tickets" },
+        { method: "post" as const, path: "/api/tickets" },
+        { method: "get" as const, path: "/api/tickets/1" },
+        { method: "get" as const, path: "/api/attachments/1" },
+        { method: "get" as const, path: "/api/dashboard/requester" },
+        { method: "get" as const, path: "/api/dashboard/staff" },
+        { method: "get" as const, path: "/api/admin/users" },
+      ];
+
+      for (const ep of endpoints) {
+        const res = await request(app)[ep.method](ep.path).set("x-requester-id", "1");
+        expect(res.status).toBe(401);
+      }
+    } finally {
+      process.env.ALLOW_LEGACY_REQUESTER_HEADER = prev;
+    }
+  });
 });
