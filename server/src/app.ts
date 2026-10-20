@@ -62,6 +62,14 @@ const ALLOWED_EXTENSION_MIMES: Record<string, string[]> = {
   ".pdf": ["application/pdf"],
 };
 
+export const EXTENSION_CANONICAL_MIME: Record<string, string> = {
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".png": "image/png",
+  ".webp": "image/webp",
+  ".pdf": "application/pdf",
+};
+
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
@@ -1453,6 +1461,7 @@ app.post("/api/tickets/:id/attachments", authenticate, async (req: Authenticated
         const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
         const ext = path.extname(sanitizedOriginalName).toLowerCase();
         const generatedFilename = `file-${uniqueSuffix}${ext}`;
+        const canonicalMime = EXTENSION_CANONICAL_MIME[ext] || "application/octet-stream";
 
         const attachment = await getPrisma().$transaction(async (tx) => {
           const currentActive = await tx.attachment.count({
@@ -1467,7 +1476,7 @@ app.post("/api/tickets/:id/attachments", authenticate, async (req: Authenticated
               filename: generatedFilename,
               originalName: sanitizedOriginalName,
               size: req.file!.size,
-              mimeType: req.file!.mimetype,
+              mimeType: canonicalMime,
               blob: {
                 create: {
                   data: req.file!.buffer,
@@ -1542,7 +1551,9 @@ app.get("/api/attachments/:id", authenticate, async (req: AuthenticatedRequest, 
     }
 
     const safeName = attachment.originalName.replace(/["\r\n]/g, "_");
-    res.setHeader("Content-Type", attachment.mimeType || "application/octet-stream");
+    const ext = path.extname(attachment.filename || attachment.originalName).toLowerCase();
+    const downloadMime = EXTENSION_CANONICAL_MIME[ext] || attachment.mimeType || "application/octet-stream";
+    res.setHeader("Content-Type", downloadMime);
     res.setHeader("Content-Length", attachment.size.toString());
     res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
     res.setHeader("X-Content-Type-Options", "nosniff");

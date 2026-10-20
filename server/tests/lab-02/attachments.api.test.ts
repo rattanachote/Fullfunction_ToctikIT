@@ -128,7 +128,7 @@ describe("Attachments API", () => {
     expect(res.status).toBe(400);
   });
 
-  it("sets X-Content-Type-Options: nosniff and Content-Disposition: attachment on download", async () => {
+  it("sets X-Content-Type-Options: nosniff, Content-Disposition: attachment, and canonical Content-Type on download", async () => {
     const res = await request(app)
       .get(`/api/attachments/${uploadedAttachmentId}`)
       .set("X-Requester-Id", activeRequesterId.toString());
@@ -136,5 +136,29 @@ describe("Attachments API", () => {
     expect(res.status).toBe(200);
     expect(res.headers["x-content-type-options"]).toBe("nosniff");
     expect(res.headers["content-disposition"]).toContain('attachment; filename="sample.pdf"');
+    expect(res.headers["content-type"]).toBe("application/pdf");
+  });
+
+  it("canonicalizes mimeType from whitelist extension even if upload contentType is image/jpg", async () => {
+    const jpegMagic = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46]);
+    const uploadRes = await request(app)
+      .post(`/api/tickets/${ticketId}/attachments`)
+      .set("X-Requester-Id", activeRequesterId.toString())
+      .attach("file", jpegMagic, {
+        filename: "photo.jpg",
+        contentType: "image/jpg",
+      });
+
+    expect(uploadRes.status).toBe(201);
+    expect(uploadRes.body.mimeType).toBe("image/jpeg");
+
+    const dlRes = await request(app)
+      .get(`/api/attachments/${uploadRes.body.id}`)
+      .set("X-Requester-Id", activeRequesterId.toString());
+
+    expect(dlRes.status).toBe(200);
+    expect(dlRes.headers["content-type"]).toBe("image/jpeg");
+    expect(dlRes.headers["x-content-type-options"]).toBe("nosniff");
+    expect(dlRes.headers["content-disposition"]).toContain('attachment; filename="photo.jpg"');
   });
 });
