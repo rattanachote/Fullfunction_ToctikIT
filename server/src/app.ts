@@ -68,49 +68,66 @@ export const authenticate = async (
   res: Response,
   next: NextFunction
 ) => {
-  let userId: number | null = null;
-
   const authHeader = req.headers["authorization"];
   const xRequesterId = req.headers["x-requester-id"];
 
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const token = authHeader.split(" ")[1];
-    const session = getSession(token);
-    if (!session) {
-      res.status(401).json({ error: "Invalid or expired session" });
+  try {
+    let authenticatedUser: {
+      userId: number;
+      email: string;
+      name: string;
+      role: string;
+      isActive: boolean;
+      mustChangePassword: boolean;
+    } | null = null;
+
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      const token = authHeader.split(" ")[1];
+      const session = await getSession(token);
+      if (!session) {
+        res.status(401).json({ error: "Invalid or expired session" });
+        return;
+      }
+      authenticatedUser = session;
+    } else if (xRequesterId) {
+      const parsedId = parseInt(xRequesterId as string, 10);
+      if (!isNaN(parsedId)) {
+        const user = await getPrisma().user.findUnique({ where: { id: parsedId } });
+        if (user) {
+          authenticatedUser = {
+            userId: user.id,
+            email: user.email,
+            name: user.name,
+            role: user.role,
+            isActive: user.isActive,
+            mustChangePassword: user.mustChangePassword,
+          };
+        }
+      } else {
+        res.status(401).json({ error: "Authentication required" });
+        return;
+      }
+    } else {
+      res.status(401).json({ error: "Authentication required" });
       return;
     }
-    userId = session.userId;
-  } else if (xRequesterId) {
-    const parsedId = parseInt(xRequesterId as string, 10);
-    if (!isNaN(parsedId)) {
-      userId = parsedId;
-    }
-  }
 
-  if (!userId) {
-    res.status(401).json({ error: "Authentication required" });
-    return;
-  }
-
-  try {
-    const user = await getPrisma().user.findUnique({ where: { id: userId } });
-    if (!user || !user.isActive) {
+    if (!authenticatedUser || !authenticatedUser.isActive) {
       res.status(401).json({ error: "User is inactive or not found" });
       return;
     }
 
     req.user = {
-      userId: user.id,
-      email: user.email,
-      name: user.name,
-      role: user.role,
-      mustChangePassword: user.mustChangePassword,
+      userId: authenticatedUser.userId,
+      email: authenticatedUser.email,
+      name: authenticatedUser.name,
+      role: authenticatedUser.role,
+      mustChangePassword: authenticatedUser.mustChangePassword,
     };
 
     // BR-02: A user marked as requiring password change cannot enter the normal application
     if (
-      user.mustChangePassword &&
+      authenticatedUser.mustChangePassword &&
       req.path !== "/api/auth/change-password" &&
       req.path !== "/api/auth/logout" &&
       req.path !== "/api/auth/me"
@@ -170,7 +187,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
       return;
     }
 
-    const token = createSession(user.id, user.email, user.name, user.role);
+    const token = await createSession(user.id, user.email, user.name, user.role);
     res.status(200).json({
       token,
       user: {
@@ -186,11 +203,11 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   }
 });
 
-app.post("/api/auth/logout", authenticate, (req: AuthenticatedRequest, res: Response) => {
+app.post("/api/auth/logout", authenticate, async (req: AuthenticatedRequest, res: Response) => {
   const authHeader = req.headers["authorization"];
   if (authHeader && authHeader.startsWith("Bearer ")) {
     const token = authHeader.split(" ")[1];
-    destroySession(token);
+    await destroySession(token);
   }
   res.status(200).json({ message: "Logged out successfully" });
 });

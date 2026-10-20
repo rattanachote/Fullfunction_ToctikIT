@@ -1,4 +1,5 @@
 import crypto from "crypto";
+import { getPrisma } from "./prisma.js";
 
 const ITERATIONS = 10000;
 const KEY_LEN = 64;
@@ -25,35 +26,93 @@ export function verifyPassword(password: string, storedHash: string): boolean {
   return hash === testHash;
 }
 
-// Session Management
-export interface Session {
+/**
+ * Hash a session token using SHA-256 so raw tokens are never stored in Postgres.
+ */
+export function hashToken(token: string): string {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+export interface SessionWithUser {
   userId: number;
   email: string;
   name: string;
   role: string;
+  isActive: boolean;
+  mustChangePassword: boolean;
   expiresAt: Date;
 }
 
-const sessions = new Map<string, Session>();
+/**
+ * Create a new 24-hour session in Postgres after cleaning up expired sessions.
+ */
+export async function createSession(
+  userId: number,
+  _email?: string,
+  _name?: string,
+  _role?: string
+): Promise<string> {
+  const prisma = getPrisma();
+  const now = new Date();
 
-export function createSession(userId: number, email: string, name: string, role: string): string {
+  // Clean up expired sessions on login
+  await prisma.session.deleteMany({
+    where: { expiresAt: { lt: now } },
+  });
+
   const token = crypto.randomBytes(32).toString("hex");
-  const expiresAt = new Date();
-  expiresAt.setHours(expiresAt.getHours() + 24); // 24 hour session
-  sessions.set(token, { userId, email, name, role, expiresAt });
+  const tokenHash = hashToken(token);
+  const expiresAt = new Date(now.getTime() + 24 * 60 * 60 * 1000); // 24 hour session
+
+  await prisma.session.create({
+    data: {
+      tokenHash,
+      userId,
+      expiresAt,
+    },
+  });
+
   return token;
 }
 
-export function getSession(token: string): Session | null {
-  const session = sessions.get(token);
+/**
+ * Look up a session by SHA-256 token hash and fetch its associated User in a single query.
+ */
+export async function getSession(token: string): Promise<SessionWithUser | null> {
+  const prisma = getPrisma();
+  const tokenHash = hashToken(token);
+
+  const session = await prisma.session.findUnique({
+    where: { tokenHash },
+    include: { user: true },
+  });
+
   if (!session) return null;
+
   if (new Date() > session.expiresAt) {
-    sessions.delete(token);
+    await prisma.session.deleteMany({ where: { tokenHash } });
     return null;
   }
-  return session;
+
+  return {
+    userId: session.user.id,
+    email: session.user.email,
+    name: session.user.name,
+    role: session.user.role,
+    isActive: session.user.isActive,
+    mustChangePassword: session.user.mustChangePassword,
+    expiresAt: session.expiresAt,
+  };
 }
 
-export function destroySession(token: string): boolean {
-  return sessions.delete(token);
+/**
+ * Destroy a session in Postgres by its SHA-256 token hash.
+ */
+export async function destroySession(token: string): Promise<boolean> {
+  const prisma = getPrisma();
+  const tokenHash = hashToken(token);
+  const result = await prisma.session.deleteMany({
+    where: { tokenHash },
+  });
+  return result.count > 0;
 }

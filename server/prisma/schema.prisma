@@ -21,6 +21,18 @@ model User {
   comments           PublicComment[]
   internalNotes      InternalNote[]
   actionsTaken       ActionTaken[]
+  sessions           Session[]
+}
+
+model Session {
+  id        Int      @id @default(autoincrement())
+  tokenHash String   @unique
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([expiresAt])
 }
 
 model Category {
