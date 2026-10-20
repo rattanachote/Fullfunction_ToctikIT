@@ -5,10 +5,16 @@ import { app } from "../../src/app.js";
 // WORKED EXAMPLE — this test is written for you. Study it, then implement the
 // /api/health route in src/app.ts until this test turns green. Use the same
 // pattern to write the categories test yourself (see categories.test.ts).
-describe("GET /api/health", () => {
+describe("GET /api/health & /api/ready", () => {
   it("returns 200 with status ok and the service name", async () => {
     const res = await request(app).get("/api/health");
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: "ok", service: "TokTickIT API" });
+  });
+
+  it("returns 200 ready when database is reachable", async () => {
+    const res = await request(app).get("/api/ready");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "ready", db: "connected" });
   });
 });

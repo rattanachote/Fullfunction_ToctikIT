@@ -37,6 +37,7 @@ COPY --from=client-builder /app/client/dist /app/client/dist
 RUN chmod +x ./docker-entrypoint.sh
 
 ENV NODE_ENV=production
+ENV TZ=Asia/Bangkok
 ENV PORT=3000
 EXPOSE 3000
 

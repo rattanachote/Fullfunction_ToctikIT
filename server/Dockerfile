@@ -15,6 +15,7 @@ COPY docker-entrypoint.sh ./docker-entrypoint.sh
 RUN npm run build && chmod +x ./docker-entrypoint.sh
 
 ENV NODE_ENV=production
+ENV TZ=Asia/Bangkok
 ENV PORT=3000
 EXPOSE 3000
 

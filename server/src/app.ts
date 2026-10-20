@@ -18,7 +18,13 @@ const __dirname = path.dirname(__filename);
 
 export const app = express();
 
-app.use(cors());
+const corsOrigin = process.env.CORS_ORIGIN;
+if (corsOrigin) {
+  const allowedOrigins = corsOrigin.split(",").map((o) => o.trim());
+  app.use(cors({ origin: allowedOrigins }));
+} else if (process.env.NODE_ENV !== "production") {
+  app.use(cors());
+}
 app.use(express.json());
 
 // Multer in-memory storage configuration (stateless Cloud Run safe)
@@ -144,9 +150,18 @@ export const requireRole = (roles: string[]) => {
   };
 };
 
-// 1. Health check
+// 1. Health check (liveness) & Readiness check (DB connectivity)
 app.get("/api/health", (_req: Request, res: Response) => {
   res.status(200).json({ status: "ok", service: "TokTickIT API" });
+});
+
+app.get("/api/ready", async (_req: Request, res: Response) => {
+  try {
+    await getPrisma().$queryRaw`SELECT 1`;
+    res.status(200).json({ status: "ready", db: "connected" });
+  } catch (error) {
+    res.status(503).json({ status: "not_ready", error: "Database connection failed" });
+  }
 });
 
 // 2. Auth Endpoints
@@ -324,40 +339,53 @@ app.post("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Re
       return;
     }
 
-    // Generate unique Ticket Number (TKT-YYYY-XXXXXX)
+    // Generate unique Ticket Number (TKT-YYYY-XXXXXX) with retry up to 3 times on P2002 collision
     const currentYear = new Date().getFullYear();
     const prefix = `TKT-${currentYear}-`;
-    const latestTicket = await getPrisma().ticket.findFirst({
-      where: {
-        ticketNo: {
-          startsWith: prefix,
-        },
-      },
-      orderBy: {
-        ticketNo: "desc",
-      },
-    });
-    const lastSeq = latestTicket ? parseInt(latestTicket.ticketNo.slice(prefix.length), 10) || 0 : 0;
-    const seq = String(lastSeq + 1).padStart(6, "0");
-    const ticketNo = `${prefix}${seq}`;
+    const maxRetries = 3;
+    let ticket: any = null;
 
-    const ticket = await getPrisma().ticket.create({
-      data: {
-        ticketNo,
-        requesterId: req.user!.userId,
-        categoryId: parseInt(categoryId, 10),
-        relatedSystem,
-        requestedPriority,
-        itPriority: requestedPriority, // Initially copies requestedPriority
-        summary,
-        description,
-        currentStatus: "New",
-      },
-      include: {
-        category: true,
-        requester: { select: { id: true, name: true, email: true } },
-      },
-    });
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      const latestTicket = await getPrisma().ticket.findFirst({
+        where: {
+          ticketNo: {
+            startsWith: prefix,
+          },
+        },
+        orderBy: {
+          ticketNo: "desc",
+        },
+      });
+      const lastSeq = latestTicket ? parseInt(latestTicket.ticketNo.slice(prefix.length), 10) || 0 : 0;
+      const seq = String(lastSeq + 1).padStart(6, "0");
+      const ticketNo = `${prefix}${seq}`;
+
+      try {
+        ticket = await getPrisma().ticket.create({
+          data: {
+            ticketNo,
+            requesterId: req.user!.userId,
+            categoryId: parseInt(categoryId, 10),
+            relatedSystem,
+            requestedPriority,
+            itPriority: requestedPriority, // Initially copies requestedPriority
+            summary,
+            description,
+            currentStatus: "New",
+          },
+          include: {
+            category: true,
+            requester: { select: { id: true, name: true, email: true } },
+          },
+        });
+        break;
+      } catch (err: any) {
+        if (err && err.code === "P2002" && attempt < maxRetries) {
+          continue;
+        }
+        throw err;
+      }
+    }
 
     res.status(201).json(ticket);
   } catch (error) {

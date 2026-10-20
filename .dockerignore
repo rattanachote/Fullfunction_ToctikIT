@@ -7,5 +7,6 @@
 .gitignore
 test-results
 playwright-report
-server/uploads/*
-!server/uploads/.gitkeep
+server/uploads
+*.db
+*.sqlite

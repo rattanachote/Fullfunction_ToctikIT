@@ -15,8 +15,7 @@ build/
 **/!.env.example
 
 # Uploaded files & runtime databases
-server/uploads/*
-!server/uploads/.gitkeep
+server/uploads/
 *.db
 *.db-journal
 *.sqlite

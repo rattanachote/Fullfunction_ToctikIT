@@ -47,6 +47,7 @@ services:
         condition: service_completed_successfully
     environment:
       NODE_ENV: production
+      TZ: Asia/Bangkok
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-toktickit}:${POSTGRES_PASSWORD:-toktickit}@db:5432/${POSTGRES_DB:-toktickit}?schema=public
     ports:
