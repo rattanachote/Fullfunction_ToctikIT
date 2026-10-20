@@ -30,12 +30,21 @@ app.use(express.json());
 // Multer in-memory storage configuration (stateless Cloud Run safe)
 const storage = multer.memoryStorage();
 
+const ALLOWED_EXTENSION_MIMES: Record<string, string[]> = {
+  ".jpg": ["image/jpeg", "image/jpg"],
+  ".jpeg": ["image/jpeg", "image/jpg"],
+  ".png": ["image/png"],
+  ".webp": ["image/webp"],
+  ".pdf": ["application/pdf"],
+};
+
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (_req, file, cb) => {
-    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"];
-    if (allowedTypes.includes(file.mimetype)) {
+    const ext = path.extname(path.basename(file.originalname || "")).toLowerCase();
+    const allowedMimesForExt = ALLOWED_EXTENSION_MIMES[ext];
+    if (allowedMimesForExt && allowedMimesForExt.includes(file.mimetype)) {
       cb(null, true);
     } else {
       cb(new Error("Invalid file type. Only JPG, JPEG, PNG, WEBP, and PDF are allowed."));
@@ -1355,39 +1364,67 @@ app.post("/api/tickets/:id/attachments", authenticate, async (req: Authenticated
         return;
       }
 
+      if (!req.file.size || req.file.size <= 0 || !req.file.buffer || req.file.buffer.length === 0) {
+        res.status(400).json({ error: "Empty files are not allowed" });
+        return;
+      }
+
+      const headSample = req.file.buffer.subarray(0, 512).toString("utf8");
+      if (/(?:<!doctype\s+html|<html[\s>]|<svg[\s>]|<script[\s>])/i.test(headSample)) {
+        res.status(400).json({ error: "Invalid file content: HTML/SVG/script payloads are not allowed." });
+        return;
+      }
+
       try {
+        const sanitizedOriginalName =
+          path
+            .basename(req.file.originalname || "attachment")
+            .replace(/[\x00-\x1f\x7f"\\]/g, "_")
+            .slice(0, 255) || "attachment";
         const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-        const ext = path.extname(req.file.originalname);
+        const ext = path.extname(sanitizedOriginalName).toLowerCase();
         const generatedFilename = `file-${uniqueSuffix}${ext}`;
 
-        const attachment = await getPrisma().attachment.create({
-          data: {
-            ticketId: id,
-            filename: generatedFilename,
-            originalName: req.file.originalname,
-            size: req.file.size,
-            mimeType: req.file.mimetype,
-            blob: {
-              create: {
-                data: req.file.buffer,
+        const attachment = await getPrisma().$transaction(async (tx) => {
+          const currentActive = await tx.attachment.count({
+            where: { ticketId: id, isRemoved: false },
+          });
+          if (currentActive >= 5) {
+            throw new Error("MAX_ATTACHMENTS_REACHED");
+          }
+          return tx.attachment.create({
+            data: {
+              ticketId: id,
+              filename: generatedFilename,
+              originalName: sanitizedOriginalName,
+              size: req.file!.size,
+              mimeType: req.file!.mimetype,
+              blob: {
+                create: {
+                  data: req.file!.buffer,
+                },
               },
             },
-          },
-          select: {
-            id: true,
-            ticketId: true,
-            filename: true,
-            originalName: true,
-            size: true,
-            mimeType: true,
-            isRemoved: true,
-            removeReason: true,
-            createdAt: true,
-          },
+            select: {
+              id: true,
+              ticketId: true,
+              filename: true,
+              originalName: true,
+              size: true,
+              mimeType: true,
+              isRemoved: true,
+              removeReason: true,
+              createdAt: true,
+            },
+          });
         });
 
         res.status(201).json(attachment);
-      } catch (dbErr) {
+      } catch (dbErr: any) {
+        if (dbErr && dbErr.message === "MAX_ATTACHMENTS_REACHED") {
+          res.status(400).json({ error: "Maximum active attachments limit (5) reached" });
+          return;
+        }
         res.status(500).json({ error: "Failed to save attachment" });
       }
     });
@@ -1439,6 +1476,7 @@ app.get("/api/attachments/:id", authenticate, async (req: AuthenticatedRequest, 
     res.setHeader("Content-Type", attachment.mimeType || "application/octet-stream");
     res.setHeader("Content-Length", attachment.size.toString());
     res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+    res.setHeader("X-Content-Type-Options", "nosniff");
     res.status(200).send(Buffer.from(attachment.blob.data));
   } catch (error) {
     res.status(500).json({ error: "Failed to download file" });

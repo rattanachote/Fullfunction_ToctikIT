@@ -96,4 +96,45 @@ describe("Attachments API", () => {
 
     expect(res.status).toBe(400);
   });
+
+  it("rejects .svg or .html file even when Content-Type is spoofed as image/png", async () => {
+    const svgRes = await request(app)
+      .post(`/api/tickets/${ticketId}/attachments`)
+      .set("X-Requester-Id", activeRequesterId.toString())
+      .attach("file", Buffer.from("<svg onload=alert(1)></svg>"), {
+        filename: "payload.svg",
+        contentType: "image/png",
+      });
+    expect(svgRes.status).toBe(400);
+
+    const htmlInPngRes = await request(app)
+      .post(`/api/tickets/${ticketId}/attachments`)
+      .set("X-Requester-Id", activeRequesterId.toString())
+      .attach("file", Buffer.from("<html><script>alert(1)</script></html>"), {
+        filename: "spoofed.png",
+        contentType: "image/png",
+      });
+    expect(htmlInPngRes.status).toBe(400);
+  });
+
+  it("rejects 0-byte empty file upload", async () => {
+    const res = await request(app)
+      .post(`/api/tickets/${ticketId}/attachments`)
+      .set("X-Requester-Id", activeRequesterId.toString())
+      .attach("file", Buffer.alloc(0), {
+        filename: "empty.pdf",
+        contentType: "application/pdf",
+      });
+    expect(res.status).toBe(400);
+  });
+
+  it("sets X-Content-Type-Options: nosniff and Content-Disposition: attachment on download", async () => {
+    const res = await request(app)
+      .get(`/api/attachments/${uploadedAttachmentId}`)
+      .set("X-Requester-Id", activeRequesterId.toString());
+
+    expect(res.status).toBe(200);
+    expect(res.headers["x-content-type-options"]).toBe("nosniff");
+    expect(res.headers["content-disposition"]).toContain('attachment; filename="sample.pdf"');
+  });
 });
