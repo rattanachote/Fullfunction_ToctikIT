@@ -46,6 +46,11 @@ npm run dev            # Starts Vite UI on http://localhost:5173
 ```
 
 ### Docker Deployment (`docker-compose.yml` & `Dockerfile`)
+
+> [!WARNING]
+> **`docker-compose.yml` is strictly for local development and testing on `localhost` only.**
+> It uses fallback environment variables (`ADMIN_PASSWORD=AdminInitial123!`, `DEMO_USER_PASSWORD=DemoInitial123!`, `SEED_DEMO_DATA=true`, `POSTGRES_PASSWORD=toktickit`) so that local evaluation works out of the box. **Never expose `docker-compose.yml` directly on a public internet-facing server.** For production or cloud deployments, use `./deploy/deploy.sh` (which generates random secrets in Google Secret Manager and disables demo seeding by default).
+
 You can build and run the entire full-stack application (PostgreSQL 16 + one-shot Prisma Migration/Seed + Express/Prisma API + React/Nginx Frontend) with a single command:
 
 ```bash

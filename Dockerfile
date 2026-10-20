@@ -30,6 +30,7 @@ RUN apk add --no-cache openssl
 COPY --from=server-builder /app/server/package*.json ./
 COPY --from=server-builder /app/server/node_modules ./node_modules
 COPY --from=server-builder /app/server/dist ./dist
+COPY --from=server-builder /app/server/src ./src
 COPY --from=server-builder /app/server/prisma ./prisma
 COPY --from=server-builder /app/server/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=client-builder /app/client/dist /app/client/dist
