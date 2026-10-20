@@ -97,6 +97,7 @@ describe("Authentication API", () => {
     try {
       const endpoints = [
         { method: "get" as const, path: "/api/auth/me" },
+        { method: "get" as const, path: "/api/requesters" },
         { method: "get" as const, path: "/api/tickets" },
         { method: "post" as const, path: "/api/tickets" },
         { method: "get" as const, path: "/api/tickets/1" },
