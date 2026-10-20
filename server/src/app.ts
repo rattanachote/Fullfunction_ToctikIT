@@ -11,6 +11,7 @@ import {
   createSession,
   getSession,
   destroySession,
+  revokeUserSessions,
 } from "./auth.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -184,18 +185,20 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
   try {
     const user = await getPrisma().user.findUnique({ where: { email } });
     if (!user) {
+      // Equalize timing against missing-email enumeration
+      verifyPassword(password, "00000000000000000000000000000000:" + "0".repeat(128));
       res.status(401).json({ error: "Invalid email or password" });
-      return;
-    }
-
-    if (!user.isActive) {
-      res.status(403).json({ error: "Account is inactive. Please contact an administrator." });
       return;
     }
 
     const isValid = verifyPassword(password, user.passwordHash);
     if (!isValid) {
       res.status(401).json({ error: "Invalid email or password" });
+      return;
+    }
+
+    if (!user.isActive) {
+      res.status(403).json({ error: "Account is inactive. Please contact an administrator." });
       return;
     }
 
@@ -272,6 +275,11 @@ app.post("/api/auth/change-password", authenticate, async (req: AuthenticatedReq
         mustChangePassword: false,
       },
     });
+
+    const authHeader = req.headers["authorization"];
+    const currentToken =
+      authHeader && authHeader.startsWith("Bearer ") ? authHeader.split(" ")[1] : undefined;
+    await revokeUserSessions(user.id, currentToken);
 
     res.status(200).json({ message: "Password updated successfully" });
   } catch (error) {
@@ -1315,6 +1323,7 @@ app.put("/api/admin/users/:id/reset-password", authenticate, requireRole(["Admin
         mustChangePassword: true, // Forces password change at next login
       },
     });
+    await revokeUserSessions(targetId);
 
     res.status(200).json({ message: "Password reset successful" });
   } catch (error) {

@@ -115,4 +115,85 @@ describe("Authentication API", () => {
       process.env.ALLOW_LEGACY_REQUESTER_HEADER = prev;
     }
   });
+
+  it("does not reveal inactive account status (returns 401, not 403) when login password is wrong", async () => {
+    const inactiveEmail = "inactive.enum@example.com";
+    await getPrisma().user.deleteMany({ where: { email: inactiveEmail } });
+    await getPrisma().user.create({
+      data: {
+        name: "Inactive User",
+        email: inactiveEmail,
+        passwordHash: hashPassword("CorrectPass123!"),
+        role: "Requester",
+        mustChangePassword: false,
+        isActive: false,
+      },
+    });
+
+    const wrongPassRes = await request(app)
+      .post("/api/auth/login")
+      .send({ email: inactiveEmail, password: "WrongPassword999!" });
+    expect(wrongPassRes.status).toBe(401);
+
+    const rightPassRes = await request(app)
+      .post("/api/auth/login")
+      .send({ email: inactiveEmail, password: "CorrectPass123!" });
+    expect(rightPassRes.status).toBe(403);
+  });
+
+  it("revokes other active sessions when user changes password and revokes all sessions on admin password reset", async () => {
+    const revokeEmail = "session.revoke@example.com";
+    const adminEmail = "session.admin@example.com";
+    await getPrisma().user.deleteMany({ where: { email: { in: [revokeEmail, adminEmail] } } });
+
+    const u = await getPrisma().user.create({
+      data: {
+        name: "Session Revoke User",
+        email: revokeEmail,
+        passwordHash: hashPassword("InitPass123!"),
+        role: "Requester",
+        mustChangePassword: false,
+        isActive: true,
+      },
+    });
+    await getPrisma().user.create({
+      data: {
+        name: "Session Admin",
+        email: adminEmail,
+        passwordHash: hashPassword("AdminPass123!"),
+        role: "Administrator",
+        mustChangePassword: false,
+        isActive: true,
+      },
+    });
+
+    const login1 = await request(app).post("/api/auth/login").send({ email: revokeEmail, password: "InitPass123!" });
+    const login2 = await request(app).post("/api/auth/login").send({ email: revokeEmail, password: "InitPass123!" });
+    const tok1 = login1.body.token;
+    const tok2 = login2.body.token;
+
+    // Change password using tok1 -> tok2 must be revoked (401), tok1 stays valid (200)
+    const chgRes = await request(app)
+      .post("/api/auth/change-password")
+      .set("Authorization", `Bearer ${tok1}`)
+      .send({ currentPassword: "InitPass123!", newPassword: "ChangedPass123!" });
+    expect(chgRes.status).toBe(200);
+
+    const meTok2 = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${tok2}`);
+    expect(meTok2.status).toBe(401);
+
+    const meTok1 = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${tok1}`);
+    expect(meTok1.status).toBe(200);
+
+    // Admin resets password -> tok1 must also be revoked (401)
+    const loginAdmin = await request(app).post("/api/auth/login").send({ email: adminEmail, password: "AdminPass123!" });
+    const resetRes = await request(app)
+      .put(`/api/admin/users/${u.id}/reset-password`)
+      .set("Authorization", `Bearer ${loginAdmin.body.token}`)
+      .send({ newInitialPassword: "AdminReset123!" });
+    expect(resetRes.status).toBe(200);
+
+    const meAfterReset = await request(app).get("/api/auth/me").set("Authorization", `Bearer ${tok1}`);
+    expect(meAfterReset.status).toBe(401);
+  });
 });

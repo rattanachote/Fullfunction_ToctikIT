@@ -16,14 +16,16 @@ export function hashPassword(password: string): string {
 }
 
 /**
- * Verify a password against a stored "salt:hash" string.
+ * Verify a password against a stored "salt:hash" string using constant-time comparison.
  */
 export function verifyPassword(password: string, storedHash: string): boolean {
   const parts = storedHash.split(":");
   if (parts.length !== 2) return false;
   const [salt, hash] = parts;
-  const testHash = crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LEN, DIGEST).toString("hex");
-  return hash === testHash;
+  const testBuf = crypto.pbkdf2Sync(password, salt, ITERATIONS, KEY_LEN, DIGEST);
+  const storedBuf = Buffer.from(hash, "hex");
+  if (storedBuf.length !== testBuf.length) return false;
+  return crypto.timingSafeEqual(storedBuf, testBuf);
 }
 
 /**
@@ -115,4 +117,17 @@ export async function destroySession(token: string): Promise<boolean> {
     where: { tokenHash },
   });
   return result.count > 0;
+}
+
+/**
+ * Revoke all sessions for a given userId, optionally keeping the current token active.
+ */
+export async function revokeUserSessions(userId: number, keepToken?: string): Promise<number> {
+  const prisma = getPrisma();
+  const where: any = { userId };
+  if (keepToken) {
+    where.tokenHash = { not: hashToken(keepToken) };
+  }
+  const result = await prisma.session.deleteMany({ where });
+  return result.count;
 }
