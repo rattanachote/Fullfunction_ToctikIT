@@ -249,23 +249,23 @@ else
   SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" --region "$REGION" --project "$PROJECT_ID" --format='value(status.url)')"
 fi
 
-echo ""
-echo "=================================================================="
-echo "Deployment Completed!"
-echo "Service URL    : ${SERVICE_URL}"
-echo "Health Check   : ${SERVICE_URL}/api/health"
-echo "Readiness Check: ${SERVICE_URL}/api/ready"
-echo "Admin Email    : john.smith@example.com (mustChangePassword: true)"
+printf '\n'
+printf '%s\n' "=================================================================="
+printf '%s\n' "Deployment Completed!"
+printf '%s\n' "Service URL    : ${SERVICE_URL}"
+printf '%s\n' "Health Check   : ${SERVICE_URL}/api/health"
+printf '%s\n' "Readiness Check: ${SERVICE_URL}/api/ready"
+printf '%s\n' "Admin Email    : john.smith@example.com (mustChangePassword: true)"
 if [ -n "$GENERATED_ADMIN_PASSWORD" ]; then
-  echo "Admin Password : ${GENERATED_ADMIN_PASSWORD}  (Save this now; stored in Secret Manager: ${SECRET_ADMIN_PASS})"
+  printf '%s\n' "Admin Password : ${GENERATED_ADMIN_PASSWORD}  (Save this now; stored in Secret Manager: ${SECRET_ADMIN_PASS})"
 else
-  echo "Admin Password : (Existing secret '${SECRET_ADMIN_PASS}' preserved; view with: gcloud secrets versions access latest --secret=${SECRET_ADMIN_PASS})"
+  printf '%s\n' "Admin Password : (Existing secret '${SECRET_ADMIN_PASS}' preserved; view with: gcloud secrets versions access latest --secret=${SECRET_ADMIN_PASS})"
 fi
 if [ "$SEED_DEMO_DATA" = "true" ]; then
   if [ -n "$GENERATED_DEMO_PASSWORD" ]; then
-    echo "Demo Password  : ${GENERATED_DEMO_PASSWORD}  (Stored in Secret Manager: ${SECRET_DEMO_PASS})"
+    printf '%s\n' "Demo Password  : ${GENERATED_DEMO_PASSWORD}  (Stored in Secret Manager: ${SECRET_DEMO_PASS})"
   else
-    echo "Demo Password  : (Existing secret '${SECRET_DEMO_PASS}' preserved; view with: gcloud secrets versions access latest --secret=${SECRET_DEMO_PASS})"
+    printf '%s\n' "Demo Password  : (Existing secret '${SECRET_DEMO_PASS}' preserved; view with: gcloud secrets versions access latest --secret=${SECRET_DEMO_PASS})"
   fi
 fi
-echo "=================================================================="
+printf '%s\n' "=================================================================="
