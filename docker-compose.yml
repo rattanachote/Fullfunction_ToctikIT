@@ -17,6 +17,23 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: toktickit-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-toktickit}:${POSTGRES_PASSWORD:-toktickit}@db:5432/${POSTGRES_DB:-toktickit}?schema=public
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-AdminInitial123!}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-DemoInitial123!}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+    command: ["sh", "-c", "npx prisma migrate deploy && npm run prisma:seed"]
+
   server:
     build:
       context: ./server
@@ -26,11 +43,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     environment:
       NODE_ENV: production
       PORT: 3000
       DATABASE_URL: postgresql://${POSTGRES_USER:-toktickit}:${POSTGRES_PASSWORD:-toktickit}@db:5432/${POSTGRES_DB:-toktickit}?schema=public
-      RUN_SEED: "true"
     ports:
       - "3000:3000"
     volumes:

@@ -11,12 +11,26 @@ async function main() {
     return;
   }
 
+  const isProduction = process.env.NODE_ENV === "production";
+  const shouldSeedDemo = isProduction
+    ? process.env.SEED_DEMO_DATA === "true"
+    : process.env.SEED_DEMO_DATA !== "false";
+
   const adminPlainPassword =
     process.env.ADMIN_PASSWORD ||
-    (process.env.NODE_ENV === "production" ? "" : "password123");
+    (isProduction ? "" : "password123");
 
   if (!adminPlainPassword) {
     throw new Error("ADMIN_PASSWORD environment variable is required when seeding in production.");
+  }
+
+  const demoPlainPassword =
+    process.env.DEMO_USER_PASSWORD ||
+    process.env.ADMIN_PASSWORD ||
+    (isProduction ? "" : "password123");
+
+  if (shouldSeedDemo && !demoPlainPassword) {
+    throw new Error("DEMO_USER_PASSWORD or ADMIN_PASSWORD environment variable is required when SEED_DEMO_DATA=true in production.");
   }
 
   // 1. Seed Categories (non-destructive)
@@ -51,39 +65,9 @@ async function main() {
   }
   console.log("Seeded related systems.");
 
-  const defaultHash = hashPassword("password123");
   const adminHash = hashPassword(adminPlainPassword);
 
-  // 3. Seed Users (create only when User table is empty; never overwrite passwordHash or role)
-  const requestersData = [
-    { name: "Jennifer Anderson", email: "jennifer.a@example.com", role: "Requester", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
-    { name: "Michael Brown", email: "michael.b@example.com", role: "Requester", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
-    { name: "Sarah Johnson", email: "sarah.j@example.com", role: "Requester", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
-    { name: "David Lee", email: "david.l@example.com", role: "Requester", isActive: true, passwordHash: defaultHash, mustChangePassword: true },
-    { name: "Inactive Test User", email: "inactive.user@example.com", role: "Requester", isActive: false, passwordHash: defaultHash, mustChangePassword: true },
-  ];
-
-  const dbRequesters: any[] = [];
-  for (const r of requestersData) {
-    const user = await prisma.user.create({ data: r });
-    dbRequesters.push(user);
-  }
-  console.log("Seeded requesters.");
-
-  const itStaffData = [
-    { name: "Sarah IT Support", email: "sarah.it@example.com", role: "ITStaff", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
-    { name: "John Support", email: "john.s@example.com", role: "ITStaff", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
-    { name: "Alice Staff", email: "alice.s@example.com", role: "ITStaff", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
-    { name: "Inactive IT Staff", email: "inactive.it@example.com", role: "ITStaff", isActive: false, passwordHash: defaultHash, mustChangePassword: true },
-  ];
-
-  const dbITStaff: any[] = [];
-  for (const s of itStaffData) {
-    const user = await prisma.user.create({ data: s });
-    dbITStaff.push(user);
-  }
-  console.log("Seeded IT staff.");
-
+  // 3. Seed Administrator
   const adminsData = [
     { name: "John Smith", email: "john.smith@example.com", role: "Administrator", isActive: true, passwordHash: adminHash, mustChangePassword: true },
   ];
@@ -95,7 +79,44 @@ async function main() {
   }
   console.log("Seeded administrators.");
 
-  // 4. Seed initial sample Tickets (only when database was empty)
+  if (!shouldSeedDemo) {
+    console.log("Production mode (SEED_DEMO_DATA is not 'true'): skipped demo users and sample tickets.");
+    return;
+  }
+
+  const demoHash = hashPassword(demoPlainPassword);
+  const forceDemoChangePassword = isProduction ? true : false;
+
+  // 4. Seed Demo Users & Sample Tickets (only when shouldSeedDemo is true)
+  const requestersData = [
+    { name: "Jennifer Anderson", email: "jennifer.a@example.com", role: "Requester", isActive: true, passwordHash: demoHash, mustChangePassword: forceDemoChangePassword },
+    { name: "Michael Brown", email: "michael.b@example.com", role: "Requester", isActive: true, passwordHash: demoHash, mustChangePassword: forceDemoChangePassword },
+    { name: "Sarah Johnson", email: "sarah.j@example.com", role: "Requester", isActive: true, passwordHash: demoHash, mustChangePassword: forceDemoChangePassword },
+    { name: "David Lee", email: "david.l@example.com", role: "Requester", isActive: true, passwordHash: demoHash, mustChangePassword: true },
+    { name: "Inactive Test User", email: "inactive.user@example.com", role: "Requester", isActive: false, passwordHash: demoHash, mustChangePassword: true },
+  ];
+
+  const dbRequesters: any[] = [];
+  for (const r of requestersData) {
+    const user = await prisma.user.create({ data: r });
+    dbRequesters.push(user);
+  }
+  console.log("Seeded requesters.");
+
+  const itStaffData = [
+    { name: "Sarah IT Support", email: "sarah.it@example.com", role: "ITStaff", isActive: true, passwordHash: demoHash, mustChangePassword: forceDemoChangePassword },
+    { name: "John Support", email: "john.s@example.com", role: "ITStaff", isActive: true, passwordHash: demoHash, mustChangePassword: forceDemoChangePassword },
+    { name: "Alice Staff", email: "alice.s@example.com", role: "ITStaff", isActive: true, passwordHash: demoHash, mustChangePassword: forceDemoChangePassword },
+    { name: "Inactive IT Staff", email: "inactive.it@example.com", role: "ITStaff", isActive: false, passwordHash: demoHash, mustChangePassword: true },
+  ];
+
+  const dbITStaff: any[] = [];
+  for (const s of itStaffData) {
+    const user = await prisma.user.create({ data: s });
+    dbITStaff.push(user);
+  }
+  console.log("Seeded IT staff.");
+
   const categoriesMap = {
     "Account and Access": dbCategories.find((c) => c.name === "Account and Access").id,
     "Hardware": dbCategories.find((c) => c.name === "Hardware").id,
