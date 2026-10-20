@@ -109,7 +109,7 @@ To deploy new code changes, simply run `bash ./deploy/deploy.sh` again:
 
 ### Cost Estimate & How to Avoid Charges (`teardown.sh`)
 - **Cloud Run** scales to `0` instances when idle (`--min-instances=0 --max-instances=3`, with `connection_limit=3` in `DATABASE_URL` so total DB connections stay safely below Cloud SQL limits).
-- **Cloud SQL (`POSTGRES_16`, `--edition=ENTERPRISE`, `--tier=db-f1-micro`, 10 GB SSD)** runs continuously and costs approximately **USD 9–12 / month** while active (unless covered by GCP Free Trial credits).
+- **Cloud SQL (`POSTGRES_16`, `--edition=enterprise`, `--tier=db-f1-micro`, 10 GB SSD)** runs continuously and costs approximately **USD 9–12 / month** while active (unless covered by GCP Free Trial credits).
 - **To stop all charges completely when finished testing**, run the teardown script to delete the Cloud Run Service, Cloud Run Job, Cloud SQL instance, Artifact Registry, and Secrets:
   ```bash
   bash ./deploy/teardown.sh
