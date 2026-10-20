@@ -4,7 +4,22 @@ import { hashPassword } from "../src/auth.js";
 async function main() {
   const prisma = getPrisma();
 
-  // 1. Seed Categories (idempotent upsert)
+  // Non-destructive guard: Seed only when User table is empty
+  const existingUserCount = await prisma.user.count();
+  if (existingUserCount > 0) {
+    console.log(`Database already contains ${existingUserCount} user(s). Skipping seed to preserve existing data.`);
+    return;
+  }
+
+  const adminPlainPassword =
+    process.env.ADMIN_PASSWORD ||
+    (process.env.NODE_ENV === "production" ? "" : "password123");
+
+  if (!adminPlainPassword) {
+    throw new Error("ADMIN_PASSWORD environment variable is required when seeding in production.");
+  }
+
+  // 1. Seed Categories (non-destructive)
   const categories = ["Account and Access", "Hardware", "Software", "Network"];
   const dbCategories: any[] = [];
   for (const name of categories) {
@@ -17,7 +32,7 @@ async function main() {
   }
   console.log("Seeded categories.");
 
-  // 2. Seed Related Systems (idempotent upsert)
+  // 2. Seed Related Systems (non-destructive)
   const systems = [
     "Email",
     "Campus Wi-Fi",
@@ -30,17 +45,16 @@ async function main() {
   for (const name of systems) {
     await prisma.relatedSystem.upsert({
       where: { name },
-      update: { isActive: true },
+      update: {},
       create: { name, isActive: true },
     });
   }
   console.log("Seeded related systems.");
 
-  // Hash password for seeding
   const defaultHash = hashPassword("password123");
+  const adminHash = hashPassword(adminPlainPassword);
 
-  // 3. Seed Users (idempotent upsert by email)
-  // Requesters
+  // 3. Seed Users (create only when User table is empty; never overwrite passwordHash or role)
   const requestersData = [
     { name: "Jennifer Anderson", email: "jennifer.a@example.com", role: "Requester", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
     { name: "Michael Brown", email: "michael.b@example.com", role: "Requester", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
@@ -51,16 +65,11 @@ async function main() {
 
   const dbRequesters: any[] = [];
   for (const r of requestersData) {
-    const user = await prisma.user.upsert({
-      where: { email: r.email },
-      update: { name: r.name, isActive: r.isActive, role: r.role, passwordHash: r.passwordHash, mustChangePassword: r.mustChangePassword },
-      create: r,
-    });
+    const user = await prisma.user.create({ data: r });
     dbRequesters.push(user);
   }
   console.log("Seeded requesters.");
 
-  // IT Staff
   const itStaffData = [
     { name: "Sarah IT Support", email: "sarah.it@example.com", role: "ITStaff", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
     { name: "John Support", email: "john.s@example.com", role: "ITStaff", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
@@ -70,32 +79,23 @@ async function main() {
 
   const dbITStaff: any[] = [];
   for (const s of itStaffData) {
-    const user = await prisma.user.upsert({
-      where: { email: s.email },
-      update: { name: s.name, isActive: s.isActive, role: s.role, passwordHash: s.passwordHash, mustChangePassword: s.mustChangePassword },
-      create: s,
-    });
+    const user = await prisma.user.create({ data: s });
     dbITStaff.push(user);
   }
   console.log("Seeded IT staff.");
 
-  // Administrators
   const adminsData = [
-    { name: "John Smith", email: "john.smith@example.com", role: "Administrator", isActive: true, passwordHash: defaultHash, mustChangePassword: false },
+    { name: "John Smith", email: "john.smith@example.com", role: "Administrator", isActive: true, passwordHash: adminHash, mustChangePassword: true },
   ];
 
   const dbAdmins: any[] = [];
   for (const a of adminsData) {
-    const user = await prisma.user.upsert({
-      where: { email: a.email },
-      update: { name: a.name, isActive: a.isActive, role: a.role, passwordHash: a.passwordHash, mustChangePassword: a.mustChangePassword },
-      create: a,
-    });
+    const user = await prisma.user.create({ data: a });
     dbAdmins.push(user);
   }
   console.log("Seeded administrators.");
 
-  // 4. Seed realistic Tickets covering all statuses, priorities, assigned & unassigned, 0/1/multiple Actions Taken
+  // 4. Seed initial sample Tickets (only when database was empty)
   const categoriesMap = {
     "Account and Access": dbCategories.find((c) => c.name === "Account and Access").id,
     "Hardware": dbCategories.find((c) => c.name === "Hardware").id,
@@ -214,22 +214,7 @@ async function main() {
 
   const dbTickets: Record<string, any> = {};
   for (const tData of seedTickets) {
-    const ticket = await prisma.ticket.upsert({
-      where: { ticketNo: tData.ticketNo },
-      update: {
-        requesterId: tData.requesterId,
-        ownerId: tData.ownerId,
-        categoryId: tData.categoryId,
-        relatedSystem: tData.relatedSystem,
-        requestedPriority: tData.requestedPriority,
-        itPriority: tData.itPriority,
-        currentStatus: tData.currentStatus,
-        requesterResolvedIndication: tData.requesterResolvedIndication,
-        summary: tData.summary,
-        description: tData.description,
-      },
-      create: tData,
-    });
+    const ticket = await prisma.ticket.create({ data: tData });
     dbTickets[tData.ticketNo] = ticket;
   }
 
@@ -239,13 +224,6 @@ async function main() {
   const t5 = dbTickets[`TKT-${currentYear}-000005`];
   const t6 = dbTickets[`TKT-${currentYear}-000006`];
 
-  // Clean and re-seed child items only for our deterministic seed tickets so running seed repeatedly is 100% idempotent
-  const seedTicketIds = Object.values(dbTickets).map((t: any) => t.id);
-  await prisma.actionTaken.deleteMany({ where: { ticketId: { in: seedTicketIds } } });
-  await prisma.internalNote.deleteMany({ where: { ticketId: { in: seedTicketIds } } });
-  await prisma.publicComment.deleteMany({ where: { ticketId: { in: seedTicketIds } } });
-
-  // Public Comments
   await prisma.publicComment.createMany({
     data: [
       { ticketId: t1.id, authorId: dbRequesters[0].id, content: "I noticed this since the last Windows update last week." },
@@ -256,7 +234,6 @@ async function main() {
     ],
   });
 
-  // Internal Notes
   await prisma.internalNote.create({
     data: {
       ticketId: t1.id,
@@ -265,10 +242,6 @@ async function main() {
     },
   });
 
-  // Seed Action Taken records:
-  // - Ticket 2 & 8 have 0 Actions Taken
-  // - Ticket 3 & 4 have 1 Action Taken
-  // - Ticket 1 & 5 have multiple Actions Taken by different IT Staff members (demonstrating BR-02)
   await prisma.actionTaken.createMany({
     data: [
       {
@@ -276,7 +249,7 @@ async function main() {
         actionDateTime: new Date(Date.now() - 3600 * 1000 * 5),
         actionDescription: "Ran Lenovo Vantage battery health check and calibrated power management firmware.",
         result: "Wear level reported at 68% capacity; replacement battery required.",
-        performedById: dbITStaff[0].id, // Sarah IT (Owner)
+        performedById: dbITStaff[0].id,
         followUpRequired: true,
         followUpNote: "Order replacement battery pack L19M4P72 and schedule swap with user.",
         attachmentNotes: "See battery-report.pdf attached on ticket.",
@@ -286,7 +259,7 @@ async function main() {
         actionDateTime: new Date(Date.now() - 3600 * 1000 * 2),
         actionDescription: "Verified spare battery stock in IT cabinet B and reserved unit #SN-88412.",
         result: "Replacement battery ready for installation.",
-        performedById: dbITStaff[1].id, // John Support (Different IT Staff assisting Ticket Owner)
+        performedById: dbITStaff[1].id,
         followUpRequired: false,
         attachmentNotes: null,
       },
@@ -339,7 +312,7 @@ async function main() {
     ],
   });
 
-  console.log("Seeded tickets, comments, notes, and actions taken idempotently.");
+  console.log("Seeded initial tickets, comments, notes, and actions taken.");
 }
 
 main()
