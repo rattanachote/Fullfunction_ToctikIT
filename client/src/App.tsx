@@ -11,6 +11,7 @@ import {
   fetchTicketDetails,
   uploadAttachment,
   deleteAttachment,
+  downloadAttachment,
   updateTicketOwner,
   updateTicketStatus,
   indicateResolved,
@@ -619,6 +620,90 @@ export default function App() {
       setNoteError(err.message || "Failed to add internal note.");
     } finally {
       setNoteSubmitting(false);
+    }
+  };
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+  };
+
+  const handleFileChange = (files: FileList | null, isDetail = false) => {
+    if (!files) return;
+    const fileList = Array.from(files);
+    const errors: string[] = [];
+    const validFiles: File[] = [];
+
+    const allowedTypes = ["image/jpeg", "image/jpg", "image/png", "image/webp", "application/pdf"];
+
+    fileList.forEach((file) => {
+      if (!allowedTypes.includes(file.type)) {
+        errors.push(`${file.name}: Invalid file type. Only JPG, JPEG, PNG, WEBP, and PDF are allowed.`);
+      } else if (file.size > 5 * 1024 * 1024) {
+        errors.push(`${file.name}: File is too large. Maximum size is 5MB.`);
+      } else {
+        validFiles.push(file);
+      }
+    });
+
+    if (isDetail) {
+      const currentActive = ticketDetails?.attachments?.filter((a) => !a.isRemoved).length || 0;
+      if (currentActive + validFiles.length > 5) {
+        errors.push("A ticket cannot exceed 5 active attachments.");
+      }
+      setDetailFileErrors(errors);
+      setDetailFiles(validFiles);
+    } else {
+      if (selectedFiles.length + validFiles.length > 5) {
+        errors.push("A ticket cannot exceed 5 active attachments.");
+      }
+      setFileErrors(errors);
+      setSelectedFiles((prev) => [...prev, ...validFiles].slice(0, 5));
+    }
+  };
+
+  const removeSelectedFile = (index: number) => {
+    setSelectedFiles((prev) => prev.filter((_, i) => i !== index));
+    setFileErrors([]);
+  };
+
+  const handleDetailAttachmentUpload = async () => {
+    if (detailFiles.length === 0 || !ticketDetails) return;
+    setDetailUploadLoading(true);
+    try {
+      for (const file of detailFiles) {
+        await uploadAttachment(ticketDetails.id, file);
+      }
+      setDetailFiles([]);
+      setDetailFileErrors([]);
+      await loadTicketDetails();
+    } catch (err: any) {
+      setDetailFileErrors([err.message || "Upload failed"]);
+    } finally {
+      setDetailUploadLoading(false);
+    }
+  };
+
+  const triggerRemoveAttachment = (attachmentId: number) => {
+    setRemoveAttachmentId(attachmentId);
+    setRemoveReason("");
+    setRemoveError("");
+  };
+
+  const handleSoftRemoveSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!removeReason.trim() || removeAttachmentId === null) {
+      setRemoveError("A reason is required to remove this file.");
+      return;
+    }
+
+    try {
+      await deleteAttachment(removeAttachmentId, removeReason);
+      setRemoveAttachmentId(null);
+      await loadTicketDetails();
+    } catch (err: any) {
+      setRemoveError(err.message || "Failed to remove attachment.");
     }
   };
 
@@ -1406,9 +1491,14 @@ export default function App() {
                       summary: newSummary,
                       description: newDescription,
                     });
+                    for (const file of selectedFiles) {
+                      await uploadAttachment(t.id, file);
+                    }
                     setCreatedTicketNo(t.ticketNo);
                     setNewSummary("");
                     setNewDescription("");
+                    setSelectedFiles([]);
+                    setFileErrors([]);
                   } catch (err: any) {
                     setCreateError(err.message || "Failed to create ticket");
                   } finally {
@@ -1448,6 +1538,45 @@ export default function App() {
                   <div className="mb-3">
                     <label className="form-label small fw-semibold">Description *</label>
                     <textarea className="form-control" rows={4} value={newDescription} onChange={e => setNewDescription(e.target.value)} placeholder="Detailed description of the problem" required></textarea>
+                  </div>
+
+                  {/* File Attachment section */}
+                  <div className="mb-4">
+                    <label className="form-label small fw-semibold">Attachments (optional)</label>
+                    <input
+                      type="file"
+                      className="form-control"
+                      multiple
+                      onChange={(e) => handleFileChange(e.target.files, false)}
+                      disabled={selectedFiles.length >= 5}
+                    />
+                    <div className="form-text small text-muted">
+                      Allowed: JPG, JPEG, PNG, WEBP, PDF. Max size: 5MB per file. Max 5 active attachments total.
+                    </div>
+
+                    {fileErrors.map((err, i) => (
+                      <div key={i} className="text-danger small mt-1">{err}</div>
+                    ))}
+
+                    {selectedFiles.length > 0 && (
+                      <ul className="list-group mt-3 small">
+                        {selectedFiles.map((file, index) => (
+                          <li key={index} className="list-group-item d-flex justify-content-between align-items-center">
+                            <span>
+                              <i className="bi bi-file-earmark-check text-green-secondary me-2"></i>
+                              {file.name} <span className="text-muted">({formatSize(file.size)})</span>
+                            </span>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-danger py-0 px-2"
+                              onClick={() => removeSelectedFile(index)}
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
 
                   <button type="submit" className="btn btn-green-primary" disabled={createLoading}>
@@ -1843,6 +1972,88 @@ export default function App() {
                 </div>
               )}
             </div>
+
+            {/* Attachments Management Section */}
+            <div className="row g-4 mb-4">
+              <div className="col-12">
+                <div className="card card-custom p-4 shadow-sm">
+                  <h3 className="h5 fw-bold text-green-primary mb-3">Attachments Management</h3>
+
+                  {currentUser.role === "Requester" && (
+                    <div className="mb-4 pb-3 border-bottom">
+                      <label className="form-label small fw-semibold">Add Attachment</label>
+                      <div className="input-group">
+                        <input
+                          type="file"
+                          className="form-control"
+                          multiple
+                          onChange={(e) => handleFileChange(e.target.files, true)}
+                          disabled={ticketDetails.currentStatus === "Closed" || ticketDetails.currentStatus === "Cancelled"}
+                        />
+                        <button
+                          className="btn btn-green-primary"
+                          type="button"
+                          disabled={detailFiles.length === 0 || detailUploadLoading || ticketDetails.currentStatus === "Closed" || ticketDetails.currentStatus === "Cancelled"}
+                          onClick={handleDetailAttachmentUpload}
+                        >
+                          {detailUploadLoading ? "Uploading..." : "Upload"}
+                        </button>
+                      </div>
+                      {detailFileErrors.map((err, i) => (
+                        <div key={i} className="text-danger small mt-1">{err}</div>
+                      ))}
+                    </div>
+                  )}
+
+                  <h4 className="h6 fw-semibold mb-3">Files Linked</h4>
+                  {(!ticketDetails.attachments || ticketDetails.attachments.length === 0) ? (
+                    <div className="text-center py-4 text-muted bg-light rounded border">
+                      No attachments linked to this ticket.
+                    </div>
+                  ) : (
+                    <div className="d-flex flex-column gap-2">
+                      {ticketDetails.attachments.map((a) => (
+                        <div key={a.id} className="p-2 border rounded d-flex justify-content-between align-items-center bg-light">
+                          <div className="text-truncate me-2" style={{ maxWidth: "70%" }}>
+                            {a.isRemoved ? (
+                              <del className="text-muted small d-block text-truncate">
+                                {a.originalName}
+                              </del>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => downloadAttachment(a.id, a.originalName).catch((err) => alert(err.message || "Download failed"))}
+                                className="btn btn-link p-0 fw-semibold text-green-secondary text-truncate d-block small text-start"
+                              >
+                                {a.originalName}
+                              </button>
+                            )}
+                            <span className="text-muted" style={{ fontSize: "0.75rem" }}>
+                              {formatSize(a.size)}
+                            </span>
+                            {a.isRemoved && (
+                              <span className="d-block text-danger small mt-1" style={{ fontSize: "0.75rem" }}>
+                                Removed: <em>{a.removeReason}</em>
+                              </span>
+                            )}
+                          </div>
+                          {!a.isRemoved && currentUser.role === "Requester" && (
+                            <button
+                              className="btn btn-sm btn-outline-danger py-0 px-2"
+                              style={{ fontSize: "0.8rem" }}
+                              onClick={() => triggerRemoveAttachment(a.id)}
+                              disabled={ticketDetails.currentStatus === "Closed" || ticketDetails.currentStatus === "Cancelled"}
+                            >
+                              Remove
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>
@@ -2081,6 +2292,44 @@ export default function App() {
         )}
 
       </div>
+
+      {/* Modal for soft removal reason */}
+      {removeAttachmentId !== null && (
+        <div className="modal fade show" id="removeModal" style={{ display: "block", backgroundColor: "rgba(0,0,0,0.5)" }} tabIndex={-1}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <form onSubmit={handleSoftRemoveSubmit}>
+                <div className="modal-header">
+                  <h5 className="modal-title fw-bold text-green-primary">Remove Attachment</h5>
+                  <button type="button" className="btn-close" onClick={() => setRemoveAttachmentId(null)}></button>
+                </div>
+                <div className="modal-body">
+                  {removeError && <div className="alert alert-danger">{removeError}</div>}
+                  <div className="mb-3">
+                    <label className="form-label small fw-semibold">Reason for removal *</label>
+                    <textarea
+                      className="form-control"
+                      rows={3}
+                      placeholder="Please state why you want to remove this file..."
+                      value={removeReason}
+                      onChange={(e) => setRemoveReason(e.target.value)}
+                      required
+                    ></textarea>
+                  </div>
+                </div>
+                <div className="modal-footer">
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setRemoveAttachmentId(null)}>
+                    Cancel
+                  </button>
+                  <button type="submit" className="btn btn-sm btn-danger">
+                    Soft Remove File
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
