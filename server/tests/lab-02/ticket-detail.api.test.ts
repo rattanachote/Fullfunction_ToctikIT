@@ -58,4 +58,45 @@ describe("GET /api/tickets/:id", () => {
 
     expect(res.status).toBe(403);
   });
+
+  it("returns 400 (not 500) for non-numeric or out-of-range ticket IDs and negative pagination", async () => {
+    const resNaN = await request(app)
+      .get("/api/tickets/abc")
+      .set("X-Requester-Id", requesterAId.toString());
+    expect(resNaN.status).toBe(400);
+
+    const resOverflow = await request(app)
+      .get("/api/tickets/9999999999999999")
+      .set("X-Requester-Id", requesterAId.toString());
+    expect(resOverflow.status).toBe(400);
+
+    const resNegPage = await request(app)
+      .get("/api/tickets?page=-1&limit=-5")
+      .set("X-Requester-Id", requesterAId.toString());
+    expect(resNegPage.status).toBe(200);
+
+    const resBadCat = await request(app)
+      .post("/api/tickets")
+      .set("X-Requester-Id", requesterAId.toString())
+      .send({
+        categoryId: "not-a-number",
+        relatedSystem: "Email",
+        requestedPriority: "LOW",
+        summary: "Test",
+        description: "Test",
+      });
+    expect(resBadCat.status).toBe(400);
+
+    const resMissingCat = await request(app)
+      .post("/api/tickets")
+      .set("X-Requester-Id", requesterAId.toString())
+      .send({
+        categoryId: 999999,
+        relatedSystem: "Email",
+        requestedPriority: "LOW",
+        summary: "Test",
+        description: "Test",
+      });
+    expect(resMissingCat.status).toBe(400);
+  });
 });

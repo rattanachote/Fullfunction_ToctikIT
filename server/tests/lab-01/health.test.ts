@@ -17,4 +17,19 @@ describe("GET /api/health & /api/ready", () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ status: "ready", db: "connected" });
   });
+
+  it("sets security headers and returns 400 JSON on malformed JSON payload", async () => {
+    const healthRes = await request(app).get("/api/health");
+    expect(healthRes.headers["x-content-type-options"]).toBe("nosniff");
+    expect(healthRes.headers["x-frame-options"]).toBe("DENY");
+    expect(healthRes.headers["x-powered-by"]).toBeUndefined();
+
+    const badJsonRes = await request(app)
+      .post("/api/auth/login")
+      .set("Content-Type", "application/json")
+      .send('{"email": "broken');
+    expect(badJsonRes.status).toBe(400);
+    expect(badJsonRes.headers["content-type"]).toContain("application/json");
+    expect(badJsonRes.body).toHaveProperty("error");
+  });
 });

@@ -18,6 +18,14 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const app = express();
+app.disable("x-powered-by");
+
+app.use((_req: Request, res: Response, next: NextFunction) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+  next();
+});
 
 const corsOrigin = process.env.CORS_ORIGIN;
 if (corsOrigin) {
@@ -27,6 +35,21 @@ if (corsOrigin) {
   app.use(cors());
 }
 app.use(express.json());
+app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
+  if (err instanceof SyntaxError && "status" in err && err.status === 400 && "body" in err) {
+    res.status(400).json({ error: "Invalid JSON payload" });
+    return;
+  }
+  next(err);
+});
+
+function parsePositiveInt(val: unknown): number | null {
+  const str = String(val ?? "").trim();
+  if (!/^\d+$/.test(str)) return null;
+  const num = Number(str);
+  if (!Number.isSafeInteger(num) || num < 1 || num > 2147483647) return null;
+  return num;
+}
 
 // Multer in-memory storage configuration (stateless Cloud Run safe)
 const storage = multer.memoryStorage();
@@ -356,6 +379,12 @@ app.post("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Re
       return;
     }
 
+    const parsedCategoryId = parsePositiveInt(categoryId);
+    if (!parsedCategoryId) {
+      res.status(400).json({ error: "Invalid categoryId" });
+      return;
+    }
+
     // Generate unique Ticket Number (TKT-YYYY-XXXXXX) with retry up to 3 times on P2002 collision
     const currentYear = new Date().getFullYear();
     const prefix = `TKT-${currentYear}-`;
@@ -382,7 +411,7 @@ app.post("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Re
           data: {
             ticketNo,
             requesterId: req.user!.userId,
-            categoryId: parseInt(categoryId, 10),
+            categoryId: parsedCategoryId,
             relatedSystem,
             requestedPriority,
             itPriority: requestedPriority, // Initially copies requestedPriority
@@ -399,6 +428,10 @@ app.post("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Re
       } catch (err: any) {
         if (err && err.code === "P2002" && attempt < maxRetries) {
           continue;
+        }
+        if (err && err.code === "P2003") {
+          res.status(400).json({ error: "Invalid categoryId" });
+          return;
         }
         throw err;
       }
@@ -419,8 +452,10 @@ app.get("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Res
     const category = req.query.category as string;
     const priority = req.query.priority as string;
     const status = req.query.status as string;
-    const page = parseInt(req.query.page as string, 10) || 1;
-    const limit = parseInt(req.query.limit as string, 10) || 10;
+    const rawPage = parseInt(req.query.page as string, 10);
+    const rawLimit = parseInt(req.query.limit as string, 10);
+    const page = !isNaN(rawPage) && rawPage > 0 ? rawPage : 1;
+    const limit = !isNaN(rawLimit) && rawLimit > 0 ? Math.min(rawLimit, 100) : 10;
     const sort = (req.query.sort as string) || "createdAt_desc";
 
     const where: any = {};
@@ -523,7 +558,11 @@ app.get("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Res
 // Get ticket detail (RBAC: Requesters must own; IT Staff/Admin can view any)
 app.get("/api/tickets/:id", authenticate, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const id = parseInt(req.params.id, 10);
+    const id = parsePositiveInt(req.params.id);
+    if (!id) {
+      res.status(400).json({ error: "Invalid ticket ID" });
+      return;
+    }
     const user = req.user!;
     const ticket = await getPrisma().ticket.findUnique({
       where: { id },
@@ -709,25 +748,25 @@ app.post("/api/tickets/:id/indicate-resolved", authenticate, requireRole(["Reque
       return;
     }
 
-    // Toggle resolved indication
+    // Toggle resolved indication atomically with system comment
     const nextVal = !ticket.requesterResolvedIndication;
-
-    const updated = await getPrisma().ticket.update({
-      where: { id },
-      data: { requesterResolvedIndication: nextVal },
-    });
-
-    // Create system comment
     const noteText = nextVal
       ? "marked this ticket as appearing resolved."
       : "removed the indication that this ticket appears resolved.";
-    await getPrisma().publicComment.create({
-      data: {
-        ticketId: id,
-        authorId: req.user!.userId,
-        content: `[System Notification] Requester ${noteText}`,
-      },
-    });
+
+    const [updated] = await getPrisma().$transaction([
+      getPrisma().ticket.update({
+        where: { id },
+        data: { requesterResolvedIndication: nextVal },
+      }),
+      getPrisma().publicComment.create({
+        data: {
+          ticketId: id,
+          authorId: req.user!.userId,
+          content: `[System Notification] Requester ${noteText}`,
+        },
+      }),
+    ]);
 
     res.status(200).json(updated);
   } catch (error) {
@@ -924,24 +963,25 @@ app.post("/api/tickets/:id/actions-taken", authenticate, requireRole(["ITStaff",
       return;
     }
 
-    const action = await getPrisma().actionTaken.create({
-      data: {
-        ticketId: id,
-        actionDateTime: parsedDate,
-        actionDescription: actionDescription.trim(),
-        result: result ? result.trim() : null,
-        performedById: user.userId,
-        followUpRequired: Boolean(followUpRequired),
-        followUpNote: followUpRequired && followUpNote ? followUpNote.trim() : null,
-        attachmentNotes: attachmentNotes ? attachmentNotes.trim() : null,
-      },
-      include: { performedBy: { select: { id: true, name: true, email: true, role: true } } },
-    });
-
-    await getPrisma().ticket.update({
-      where: { id },
-      data: { updatedAt: new Date() },
-    });
+    const [action] = await getPrisma().$transaction([
+      getPrisma().actionTaken.create({
+        data: {
+          ticketId: id,
+          actionDateTime: parsedDate,
+          actionDescription: actionDescription.trim(),
+          result: result ? result.trim() : null,
+          performedById: user.userId,
+          followUpRequired: Boolean(followUpRequired),
+          followUpNote: followUpRequired && followUpNote ? followUpNote.trim() : null,
+          attachmentNotes: attachmentNotes ? attachmentNotes.trim() : null,
+        },
+        include: { performedBy: { select: { id: true, name: true, email: true, role: true } } },
+      }),
+      getPrisma().ticket.update({
+        where: { id },
+        data: { updatedAt: new Date() },
+      }),
+    ]);
 
     res.status(201).json(action);
   } catch (error) {
@@ -1543,29 +1583,29 @@ app.delete("/api/attachments/:id", authenticate, async (req: AuthenticatedReques
       return;
     }
 
-    const updated = await getPrisma().attachment.update({
-      where: { id },
-      data: {
-        isRemoved: true,
-        removeReason: reason.trim(),
-      },
-      select: {
-        id: true,
-        ticketId: true,
-        filename: true,
-        originalName: true,
-        size: true,
-        mimeType: true,
-        isRemoved: true,
-        removeReason: true,
-        createdAt: true,
-      },
-    });
-
-    // Free up binary content in Postgres when soft-removed
-    await getPrisma().attachmentBlob.deleteMany({
-      where: { attachmentId: id },
-    });
+    const [updated] = await getPrisma().$transaction([
+      getPrisma().attachment.update({
+        where: { id },
+        data: {
+          isRemoved: true,
+          removeReason: reason.trim(),
+        },
+        select: {
+          id: true,
+          ticketId: true,
+          filename: true,
+          originalName: true,
+          size: true,
+          mimeType: true,
+          isRemoved: true,
+          removeReason: true,
+          createdAt: true,
+        },
+      }),
+      getPrisma().attachmentBlob.deleteMany({
+        where: { attachmentId: id },
+      }),
+    ]);
 
     res.status(200).json(updated);
   } catch (error) {
