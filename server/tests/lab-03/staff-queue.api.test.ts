@@ -103,4 +103,13 @@ describe("Staff Queue API", () => {
     // Should only return TKT-QUEUE-000001
     expect(res.body.tickets.every((t: any) => t.requesterId === requesterId)).toBe(true);
   });
+
+  it("combines search and priority filters without overwriting search condition for IT staff", async () => {
+    const res = await request(app)
+      .get("/api/tickets?search=NONEXISTENT_TICKET_QUERY_999&priority=HIGH")
+      .set("Authorization", `Bearer ${itStaffToken}`);
+    expect(res.status).toBe(200);
+    expect(res.body.tickets).toHaveLength(0);
+    expect(res.body.pagination.totalCount).toBe(0);
+  });
 });

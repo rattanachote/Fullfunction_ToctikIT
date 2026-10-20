@@ -121,4 +121,17 @@ describe("Users Admin API", () => {
     const dbUser = await getPrisma().user.findUnique({ where: { id: testUserId } });
     expect(dbUser!.mustChangePassword).toBe(true);
   });
+
+  it("rejects updating user with invalid role in PUT /api/admin/users/:id", async () => {
+    const res = await request(app)
+      .put(`/api/admin/users/${testUserId}`)
+      .set("Authorization", `Bearer ${adminToken}`)
+      .send({
+        name: "Updated Staff Name",
+        email: "staff.test@example.com",
+        role: "InvalidRoleXYZ",
+        isActive: true,
+      });
+    expect(res.status).toBe(400);
+  });
 });

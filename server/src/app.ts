@@ -431,10 +431,13 @@ app.get("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Res
     }
 
     if (search) {
-      where.OR = [
-        { ticketNo: { contains: search, mode: "insensitive" } },
-        { summary: { contains: search, mode: "insensitive" } },
-      ];
+      where.AND = where.AND || [];
+      where.AND.push({
+        OR: [
+          { ticketNo: { contains: search, mode: "insensitive" } },
+          { summary: { contains: search, mode: "insensitive" } },
+        ],
+      });
     }
 
     if (category && category !== "All Categories") {
@@ -457,10 +460,13 @@ app.get("/api/tickets", authenticate, async (req: AuthenticatedRequest, res: Res
       if (user.role === "Requester") {
         where.requestedPriority = priority;
       } else {
-        where.OR = [
-          { requestedPriority: priority },
-          { itPriority: priority }
-        ];
+        where.AND = where.AND || [];
+        where.AND.push({
+          OR: [
+            { requestedPriority: priority },
+            { itPriority: priority },
+          ],
+        });
       }
     }
 
@@ -1233,6 +1239,20 @@ app.post("/api/admin/users", authenticate, requireRole(["Administrator"]), async
 app.put("/api/admin/users/:id", authenticate, requireRole(["Administrator"]), async (req: AuthenticatedRequest, res: Response) => {
   const targetId = parseInt(req.params.id, 10);
   const { name, email, role, isActive } = req.body;
+
+  const allowedRoles = ["Requester", "ITStaff", "Administrator"];
+  if (role !== undefined && !allowedRoles.includes(role)) {
+    res.status(400).json({ error: "Invalid role selected" });
+    return;
+  }
+  if (name !== undefined && String(name).trim().length === 0) {
+    res.status(400).json({ error: "Name cannot be empty" });
+    return;
+  }
+  if (email !== undefined && String(email).trim().length === 0) {
+    res.status(400).json({ error: "Email cannot be empty" });
+    return;
+  }
 
   try {
     const user = await getPrisma().user.findUnique({ where: { id: targetId } });
