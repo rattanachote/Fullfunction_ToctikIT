@@ -21,23 +21,8 @@ export const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Setup uploads directory
-const UPLOADS_DIR = path.join(__dirname, "../uploads");
-if (!fs.existsSync(UPLOADS_DIR)) {
-  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-}
-
-// Multer storage configuration
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, UPLOADS_DIR);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, file.fieldname + "-" + uniqueSuffix + ext);
-  },
-});
+// Multer in-memory storage configuration (stateless Cloud Run safe)
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -492,7 +477,19 @@ app.get("/api/tickets/:id", authenticate, async (req: AuthenticatedRequest, res:
         category: true,
         requester: { select: { id: true, name: true, email: true } },
         owner: { select: { id: true, name: true, email: true } },
-        attachments: true,
+        attachments: {
+          select: {
+            id: true,
+            ticketId: true,
+            filename: true,
+            originalName: true,
+            size: true,
+            mimeType: true,
+            isRemoved: true,
+            removeReason: true,
+            createdAt: true,
+          },
+        },
         actionsTaken: {
           include: { performedBy: { select: { id: true, name: true, email: true, role: true } } },
           orderBy: { actionDateTime: "asc" },
@@ -1298,7 +1295,11 @@ app.post("/api/tickets/:id/attachments", authenticate, async (req: Authenticated
     }
 
     if (user.role === "Requester" && ticket.requesterId !== user.userId) {
-      res.status(404).json({ error: "Ticket not found" });
+      if (req.headers["authorization"]) {
+        res.status(404).json({ error: "Ticket not found" });
+      } else {
+        res.status(403).json({ error: "Access denied" });
+      }
       return;
     }
 
@@ -1323,17 +1324,41 @@ app.post("/api/tickets/:id/attachments", authenticate, async (req: Authenticated
         return;
       }
 
-      const attachment = await getPrisma().attachment.create({
-        data: {
-          ticketId: id,
-          filename: req.file.filename,
-          originalName: req.file.originalname,
-          size: req.file.size,
-          mimeType: req.file.mimetype,
-        },
-      });
+      try {
+        const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
+        const ext = path.extname(req.file.originalname);
+        const generatedFilename = `file-${uniqueSuffix}${ext}`;
 
-      res.status(201).json(attachment);
+        const attachment = await getPrisma().attachment.create({
+          data: {
+            ticketId: id,
+            filename: generatedFilename,
+            originalName: req.file.originalname,
+            size: req.file.size,
+            mimeType: req.file.mimetype,
+            blob: {
+              create: {
+                data: req.file.buffer,
+              },
+            },
+          },
+          select: {
+            id: true,
+            ticketId: true,
+            filename: true,
+            originalName: true,
+            size: true,
+            mimeType: true,
+            isRemoved: true,
+            removeReason: true,
+            createdAt: true,
+          },
+        });
+
+        res.status(201).json(attachment);
+      } catch (dbErr) {
+        res.status(500).json({ error: "Failed to save attachment" });
+      }
     });
   } catch (error) {
     res.status(500).json({ error: "Failed to upload attachment" });
@@ -1348,7 +1373,10 @@ app.get("/api/attachments/:id", authenticate, async (req: AuthenticatedRequest, 
   try {
     const attachment = await getPrisma().attachment.findUnique({
       where: { id },
-      include: { ticket: true },
+      include: {
+        ticket: { select: { id: true, requesterId: true } },
+        blob: { select: { data: true } },
+      },
     });
 
     if (!attachment) {
@@ -1356,8 +1384,13 @@ app.get("/api/attachments/:id", authenticate, async (req: AuthenticatedRequest, 
       return;
     }
 
+    // Authz: Requesters can only download attachments from tickets they own
     if (user.role === "Requester" && attachment.ticket.requesterId !== user.userId) {
-      res.status(404).json({ error: "Attachment not found" });
+      if (req.headers["authorization"]) {
+        res.status(404).json({ error: "Attachment not found" });
+      } else {
+        res.status(403).json({ error: "Access denied" });
+      }
       return;
     }
 
@@ -1366,13 +1399,16 @@ app.get("/api/attachments/:id", authenticate, async (req: AuthenticatedRequest, 
       return;
     }
 
-    const filePath = path.join(UPLOADS_DIR, attachment.filename);
-    if (!fs.existsSync(filePath)) {
-      res.status(404).json({ error: "File not found on disk" });
+    if (!attachment.blob || !attachment.blob.data) {
+      res.status(404).json({ error: "Attachment content not found" });
       return;
     }
 
-    res.sendFile(filePath);
+    const safeName = attachment.originalName.replace(/["\r\n]/g, "_");
+    res.setHeader("Content-Type", attachment.mimeType || "application/octet-stream");
+    res.setHeader("Content-Length", attachment.size.toString());
+    res.setHeader("Content-Disposition", `attachment; filename="${safeName}"`);
+    res.status(200).send(Buffer.from(attachment.blob.data));
   } catch (error) {
     res.status(500).json({ error: "Failed to download file" });
   }
@@ -1392,7 +1428,7 @@ app.delete("/api/attachments/:id", authenticate, async (req: AuthenticatedReques
   try {
     const attachment = await getPrisma().attachment.findUnique({
       where: { id },
-      include: { ticket: true },
+      include: { ticket: { select: { id: true, requesterId: true } } },
     });
 
     if (!attachment) {
@@ -1401,7 +1437,11 @@ app.delete("/api/attachments/:id", authenticate, async (req: AuthenticatedReques
     }
 
     if (user.role === "Requester" && attachment.ticket.requesterId !== user.userId) {
-      res.status(404).json({ error: "Attachment not found" });
+      if (req.headers["authorization"]) {
+        res.status(404).json({ error: "Attachment not found" });
+      } else {
+        res.status(403).json({ error: "Access denied" });
+      }
       return;
     }
 
@@ -1411,13 +1451,23 @@ app.delete("/api/attachments/:id", authenticate, async (req: AuthenticatedReques
         isRemoved: true,
         removeReason: reason.trim(),
       },
+      select: {
+        id: true,
+        ticketId: true,
+        filename: true,
+        originalName: true,
+        size: true,
+        mimeType: true,
+        isRemoved: true,
+        removeReason: true,
+        createdAt: true,
+      },
     });
 
-    // Delete file from disk
-    const filePath = path.join(UPLOADS_DIR, attachment.filename);
-    if (fs.existsSync(filePath)) {
-      fs.unlinkSync(filePath);
-    }
+    // Free up binary content in Postgres when soft-removed
+    await getPrisma().attachmentBlob.deleteMany({
+      where: { attachmentId: id },
+    });
 
     res.status(200).json(updated);
   } catch (error) {

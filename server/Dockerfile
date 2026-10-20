@@ -12,7 +12,7 @@ COPY tsconfig.json ./
 COPY src ./src/
 COPY docker-entrypoint.sh ./docker-entrypoint.sh
 
-RUN npm run build && chmod +x ./docker-entrypoint.sh && mkdir -p /app/uploads
+RUN npm run build && chmod +x ./docker-entrypoint.sh
 
 ENV NODE_ENV=production
 ENV PORT=3000

@@ -74,16 +74,24 @@ model Ticket {
 }
 
 model Attachment {
-  id           Int      @id @default(autoincrement())
+  id           Int             @id @default(autoincrement())
   ticketId     Int
-  ticket       Ticket   @relation(fields: [ticketId], references: [id])
+  ticket       Ticket          @relation(fields: [ticketId], references: [id])
   filename     String
   originalName String
   size         Int
   mimeType     String
-  isRemoved    Boolean  @default(false)
+  isRemoved    Boolean         @default(false)
   removeReason String?
-  createdAt    DateTime @default(now())
+  createdAt    DateTime        @default(now())
+  blob         AttachmentBlob?
+}
+
+model AttachmentBlob {
+  id           Int        @id @default(autoincrement())
+  attachmentId Int        @unique
+  attachment   Attachment @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
+  data         Bytes
 }
 
 model PublicComment {

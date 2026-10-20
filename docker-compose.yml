@@ -51,8 +51,6 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:-toktickit}:${POSTGRES_PASSWORD:-toktickit}@db:5432/${POSTGRES_DB:-toktickit}?schema=public
     ports:
       - "3000:3000"
-    volumes:
-      - uploads_data:/app/uploads
 
   client:
     build:
@@ -69,4 +67,3 @@ services:
 
 volumes:
   postgres_data:
-  uploads_data:

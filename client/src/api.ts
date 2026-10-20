@@ -565,12 +565,44 @@ export async function deleteAttachment(
   return res.json();
 }
 
-export function getAttachmentDownloadUrl(id: number, requesterId?: number): string {
+export async function downloadAttachment(
+  id: number,
+  originalName: string,
+  requesterId?: number
+): Promise<void> {
+  const headers: HeadersInit = {};
   const token = sessionStorage.getItem("auth_token");
   if (token) {
-    return `${API_URL}/api/attachments/${id}?x-auth-token=${token}`; // or we can handle authorization differently or use query param
+    headers["Authorization"] = `Bearer ${token}`;
+  } else if (requesterId) {
+    headers["X-Requester-Id"] = requesterId.toString();
   }
-  return `${API_URL}/api/attachments/${id}?x-requester-id=${requesterId}`;
+
+  const res = await fetch(`${API_URL}/api/attachments/${id}`, {
+    method: "GET",
+    headers,
+  });
+
+  if (!res.ok) {
+    let errMsg = "Failed to download attachment";
+    try {
+      const errData = await res.json();
+      if (errData.error) errMsg = errData.error;
+    } catch {
+      // ignore non-JSON error body
+    }
+    throw new Error(errMsg);
+  }
+
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = objectUrl;
+  link.download = originalName;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(objectUrl);
 }
 
 export async function checkSystem(): Promise<{ online: boolean; categories: Category[] }> {

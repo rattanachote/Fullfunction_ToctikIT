@@ -34,7 +34,7 @@ COPY --from=server-builder /app/server/prisma ./prisma
 COPY --from=server-builder /app/server/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=client-builder /app/client/dist /app/client/dist
 
-RUN chmod +x ./docker-entrypoint.sh && mkdir -p /app/server/uploads
+RUN chmod +x ./docker-entrypoint.sh
 
 ENV NODE_ENV=production
 ENV PORT=3000
