@@ -137,4 +137,25 @@ describe("Authorization API", () => {
     expect(res.status).toBe(200);
     expect(res.body.id).toBe(otherRequesterTicketId);
   });
+
+  it("blocks Requester from GET /api/requesters with 403", async () => {
+    const res = await request(app)
+      .get("/api/requesters")
+      .set("Authorization", `Bearer ${requesterToken}`);
+    expect(res.status).toBe(403);
+  });
+
+  it("allows IT Staff and Administrator to GET /api/requesters", async () => {
+    const resStaff = await request(app)
+      .get("/api/requesters")
+      .set("Authorization", `Bearer ${itStaffToken}`);
+    expect(resStaff.status).toBe(200);
+    expect(Array.isArray(resStaff.body)).toBe(true);
+
+    const resAdmin = await request(app)
+      .get("/api/requesters")
+      .set("Authorization", `Bearer ${adminToken}`);
+    expect(resAdmin.status).toBe(200);
+    expect(Array.isArray(resAdmin.body)).toBe(true);
+  });
 });

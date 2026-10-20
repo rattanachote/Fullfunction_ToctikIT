@@ -310,8 +310,8 @@ app.post("/api/auth/change-password", authenticate, async (req: AuthenticatedReq
   }
 });
 
-// 3. User Reference Endpoints (Requester dropdown) - Kept for fallback/compat
-app.get("/api/requesters", authenticate, async (_req: Request, res: Response) => {
+// 3. User Reference Endpoints (Requester dropdown) - Kept for fallback/compat (restricted to ITStaff and Administrator)
+app.get("/api/requesters", authenticate, requireRole(["ITStaff", "Administrator"]), async (_req: Request, res: Response) => {
   try {
     const requesters = await getPrisma().user.findMany({
       where: { role: "Requester", isActive: true },
