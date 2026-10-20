@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install & Test Backend (Prisma Migrate + Seed + Vitest 66 Tests)
+      - name: Install & Test Backend (Prisma Migrate + Seed + Vitest)
         working-directory: ./server
         env:
           DATABASE_URL: postgresql://toktickit:toktickit@localhost:5432/toktickit?schema=public
@@ -44,7 +44,7 @@ jobs:
           npm run prisma:seed
           npm test
 
-      - name: Install, Test & Build Frontend (Vitest 13 Suites + Production Build)
+      - name: Install, Test & Build Frontend (Vitest + Production Build)
         working-directory: ./client
         run: |
           npm ci
