@@ -108,12 +108,26 @@ To deploy new code changes, simply run `bash ./deploy/deploy.sh` again:
 - `seed.ts` detects existing users (`prisma.user.count() > 0`) and skips seeding so passwords, tickets, sessions (in the `Session` table), and file attachments (in the `AttachmentBlob` table) are never overwritten or lost.
 
 ### Cost Estimate & How to Avoid Charges (`teardown.sh`)
-- **Cloud Run** scales to `0` instances when idle (`--min-instances=0 --max-instances=3`).
-- **Cloud SQL (`db-f1-micro`, 10 GB SSD)** runs continuously and costs approximately **USD 9–12 / month** while active (unless covered by GCP Free Trial credits).
+- **Cloud Run** scales to `0` instances when idle (`--min-instances=0 --max-instances=3`, with `connection_limit=3` in `DATABASE_URL` so total DB connections stay safely below Cloud SQL limits).
+- **Cloud SQL (`POSTGRES_16`, `--edition=ENTERPRISE`, `--tier=db-f1-micro`, 10 GB SSD)** runs continuously and costs approximately **USD 9–12 / month** while active (unless covered by GCP Free Trial credits).
 - **To stop all charges completely when finished testing**, run the teardown script to delete the Cloud Run Service, Cloud Run Job, Cloud SQL instance, Artifact Registry, and Secrets:
   ```bash
   bash ./deploy/teardown.sh
   ```
+
+### Environment Variables Reference
+
+| Variable | Default / Required | Description |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | **Required** | PostgreSQL connection URL (include `&connection_limit=3` on Cloud Run). |
+| `PORT` | `3000` | HTTP port the Express server listens on (Cloud Run injects `PORT=8080`). |
+| `NODE_ENV` | `development` | Set to `production` in Docker and Cloud Run. |
+| `TZ` | `Asia/Bangkok` | Server timezone used for date/year calculations (`TKT-YYYY-XXXXXX`). |
+| `ADMIN_PASSWORD` | **Required in production** | Initial password for `john.smith@example.com` when seeding an empty DB. |
+| `SEED_DEMO_DATA` | `false` in production | Set to `true` to seed sample demo users and tickets when DB is empty. |
+| `DEMO_USER_PASSWORD` | **Required if `SEED_DEMO_DATA=true` in production** | Initial password for demo Requester/ITStaff accounts. |
+| `CORS_ORIGIN` | Optional | Comma-separated allowed CORS origins in production (disabled if unset in production). |
+| `ALLOW_LEGACY_REQUESTER_HEADER` | `false` | Legacy `X-Requester-Id` header toggle (enabled only in Vitest for Lab 2 test compatibility; restricted to `Requester` role). |
 
 ---
 
@@ -143,15 +157,15 @@ The idempotent seed (`server/prisma/seed.ts`) populates **8 tickets (`TKT-YYYY-0
 
 ---
 
-## 4. Running Automated Tests (Lab 1 – Lab 4 Regression Suite)
+## 5. Running Automated Tests (Lab 1 – Lab 4 Regression Suite)
 
-### Backend API & Integration Tests (16 Suites / 66 Tests)
+### Backend API & Integration Tests (16 Suites)
 ```bash
 cd server
 npm test
 ```
 
-### Frontend Component & Workflow Tests (13 Suites / 13 Tests)
+### Frontend Component & Workflow Tests (13 Suites)
 ```bash
 cd client
 npm test
