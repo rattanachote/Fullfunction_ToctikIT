@@ -66,7 +66,7 @@ export function validateLoginPayload(req: Request, res: Response, next: NextFunc
     return;
   }
 
-  req.body.email = trimmedEmail.toLowerCase();
+  req.body.email = trimmedEmail;
   next();
 }
 
@@ -136,6 +136,12 @@ export async function checkLoginRateLimit(req: Request, res: Response, next: Nex
   }
 }
 
+export type LoginFailureResult = {
+  failedCount: number;
+  isLocked: boolean;
+  retryAfter: number;
+};
+
 /**
  * Record a failed login attempt atomically in PostgreSQL
  * Uses INSERT ... ON CONFLICT DO UPDATE ... RETURNING to guarantee atomic increments under high concurrency.
@@ -143,10 +149,12 @@ export async function checkLoginRateLimit(req: Request, res: Response, next: Nex
 export async function recordLoginFailure(
   req: Request,
   emailInput: unknown
-): Promise<{ failedCount: number; isLocked: boolean; retryAfter: number }> {
+): Promise<LoginFailureResult> {
   const ip = getClientIp(req);
   const email = normalizeAccountKey(emailInput);
-  if (!email) return { failedCount: 0, isLocked: false, retryAfter: 0 };
+  if (!email) {
+    return { failedCount: 0, isLocked: false, retryAfter: 0 };
+  }
 
   const prisma = getPrisma();
   const now = new Date();
@@ -180,11 +188,13 @@ export async function recordLoginFailure(
         const retryAfter = isLocked ? Math.ceil(currentConfig.accountLockoutMs / 1000) : 0;
         return { failedCount: count, isLocked, retryAfter };
       }
-      break;
+      return { failedCount: 0, isLocked: false, retryAfter: 0 };
     } catch (error: any) {
-      if (attempt === maxRetries) {
-        console.error("Atomic recordLoginFailure error:", error);
+      if (attempt < maxRetries && (error?.code === "P2002" || error?.message?.includes("unique constraint"))) {
+        continue;
       }
+      console.error("Atomic recordLoginFailure error:", error);
+      return { failedCount: 0, isLocked: false, retryAfter: 0 };
     }
   }
 

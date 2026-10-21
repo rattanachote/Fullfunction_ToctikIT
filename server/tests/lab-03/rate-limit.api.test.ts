@@ -409,5 +409,58 @@ describe("Login Rate Limiting API (PostgreSQL Backed & Anti-DoS)", () => {
         .send({ email: testUserEmail, password: correctPassword });
       expect(finalRes.status).toBe(200);
     });
+
+    it("E11 Mixed-case preservation & unified rate limit key: authenticates user stored with uppercase email and groups different case variations into single rate limit key", async () => {
+      const clientIp = "192.0.2.250";
+      const mixedEmailInDb = "MixedCase.User@example.com";
+      const userPassword = "MixedPassword123!";
+
+      await getPrisma().user.deleteMany({ where: { email: mixedEmailInDb } });
+      await getPrisma().user.create({
+        data: {
+          email: mixedEmailInDb,
+          name: "Mixed Case User",
+          passwordHash: hashPassword(userPassword),
+          role: "Requester",
+          mustChangePassword: false,
+          isActive: true,
+        },
+      });
+
+      // 1. Logging in with exact uppercase email stored in DB must succeed (200)
+      const validLoginRes = await request(app)
+        .post("/api/auth/login")
+        .set("X-Forwarded-For", clientIp)
+        .send({ email: "  " + mixedEmailInDb + "  ", password: userPassword });
+      expect(validLoginRes.status).toBe(200);
+      expect(validLoginRes.body.token).toBeDefined();
+
+      // 2. Rate limit key unification:
+      // Send 3 wrong password attempts with lowercase, 2 wrong password attempts with UPPERCASE (total 5)
+      for (let i = 1; i <= 3; i++) {
+        const r = await request(app)
+          .post("/api/auth/login")
+          .set("X-Forwarded-For", clientIp)
+          .send({ email: mixedEmailInDb.toLowerCase(), password: "wrong-password" });
+        expect(r.status).toBe(401);
+      }
+
+      for (let i = 1; i <= 2; i++) {
+        const r = await request(app)
+          .post("/api/auth/login")
+          .set("X-Forwarded-For", clientIp)
+          .send({ email: mixedEmailInDb.toUpperCase(), password: "wrong-password" });
+        expect(r.status).toBe(401);
+      }
+
+      // 6th attempt using MixedCase must be locked out with 429 because rate limit key was normalized
+      const lockedRes = await request(app)
+        .post("/api/auth/login")
+        .set("X-Forwarded-For", clientIp)
+        .send({ email: mixedEmailInDb, password: userPassword });
+
+      expect(lockedRes.status).toBe(429);
+      expect(lockedRes.body.error).toMatch(/temporarily locked/i);
+    });
   });
 });
