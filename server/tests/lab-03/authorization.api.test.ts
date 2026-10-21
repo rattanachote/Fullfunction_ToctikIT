@@ -17,7 +17,30 @@ describe("Authorization API", () => {
 
     // Clean up first to ensure idempotency
     const emails = ["req.auth@example.com", "it.auth@example.com", "admin.auth@example.com", "other.req@example.com"];
-    await getPrisma().ticket.deleteMany({ where: { ticketNo: "TKT-AUTH-000001" } });
+    await getPrisma().attachmentBlob.deleteMany({
+      where: { attachment: { ticket: { requester: { email: { in: emails } } } } },
+    });
+    await getPrisma().attachment.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().actionTaken.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().publicComment.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().internalNote.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().ticket.deleteMany({
+      where: {
+        OR: [
+          { requester: { email: { in: emails } } },
+          { owner: { email: { in: emails } } },
+          { ticketNo: "TKT-AUTH-000001" },
+        ],
+      },
+    });
     await getPrisma().user.deleteMany({ where: { email: { in: emails } } });
 
     // Create a Requester

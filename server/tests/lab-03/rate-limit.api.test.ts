@@ -5,18 +5,18 @@ import { resetLoginRateLimits, setRateLimitConfig } from "../../src/rateLimit.js
 import { getPrisma } from "../../src/prisma.js";
 import { hashPassword } from "../../src/auth.js";
 
-describe("Login Rate Limiting API", () => {
+describe("Login Rate Limiting API (PostgreSQL Backed & Anti-DoS)", () => {
   const testUserEmail = "ratelimit.user@example.com";
-  const testOtherEmail = "ratelimit.other@example.com";
+  const testAdminEmail = "admin.target@example.com";
   const correctPassword = "Password123!";
 
   beforeEach(async () => {
-    resetLoginRateLimits();
+    await resetLoginRateLimits();
     const hashed = hashPassword(correctPassword);
 
     await getPrisma().session.deleteMany();
     await getPrisma().user.deleteMany({
-      where: { email: { in: [testUserEmail, testOtherEmail] } },
+      where: { email: { in: [testUserEmail, testAdminEmail] } },
     });
 
     await getPrisma().user.create({
@@ -32,127 +32,149 @@ describe("Login Rate Limiting API", () => {
 
     await getPrisma().user.create({
       data: {
-        email: testOtherEmail,
-        name: "Rate Limit Other",
+        email: testAdminEmail,
+        name: "Admin Target",
         passwordHash: hashed,
-        role: "Requester",
+        role: "Administrator",
         mustChangePassword: false,
         isActive: true,
       },
     });
   });
 
-  afterEach(() => {
-    resetLoginRateLimits();
+  afterEach(async () => {
+    await resetLoginRateLimits();
   });
 
-  describe("Tier 1: Per-IP Burst Protection", () => {
-    it("allows up to 20 requests per minute from a single IP and includes rate limit headers", async () => {
-      const clientIp = "192.168.1.100";
+  describe("Anti-DoS: Scoped Lockout per (IP, Email)", () => {
+    it("locks only the attacker's IP when failing 5 times, while the legitimate user can still log in from their IP", async () => {
+      const attackerIp = "198.51.100.1";
+      const adminIp = "203.0.113.50";
 
-      // 20 attempts using distinct accounts so Tier 2 (account lockout) is not triggered
-      for (let i = 1; i <= 20; i++) {
-        const res = await request(app)
-          .post("/api/auth/login")
-          .set("X-Forwarded-For", clientIp)
-          .send({ email: `burst-user-${i}@example.com`, password: "wrong-password" });
-
-        expect(res.status).toBe(401);
-        expect(res.headers["x-ratelimit-limit"]).toBe("20");
-        expect(Number(res.headers["x-ratelimit-remaining"])).toBe(20 - i);
-        expect(res.headers["x-ratelimit-reset"]).toBeDefined();
-      }
-
-      // 21st attempt from the same IP should be blocked with 429
-      const blockedRes = await request(app)
-        .post("/api/auth/login")
-        .set("X-Forwarded-For", clientIp)
-        .send({ email: "burst-user-21@example.com", password: "wrong-password" });
-
-      expect(blockedRes.status).toBe(429);
-      expect(blockedRes.body.error).toMatch(/too many login requests/i);
-      expect(blockedRes.headers["retry-after"]).toBeDefined();
-      expect(Number(blockedRes.headers["retry-after"])).toBeGreaterThan(0);
-
-      // A different IP should NOT be blocked
-      const differentIpRes = await request(app)
-        .post("/api/auth/login")
-        .set("X-Forwarded-For", "192.168.1.200")
-        .send({ email: testOtherEmail, password: correctPassword });
-
-      expect(differentIpRes.status).toBe(200);
-      expect(differentIpRes.body.token).toBeDefined();
-    });
-  });
-
-  describe("Tier 2: Per-Account Failed Attempts Protection", () => {
-    it("locks an account after 5 consecutive failed logins and rejects further attempts with 429", async () => {
-      // Use different IPs for each request to verify account-based lockout independent of IP
+      // Attacker attempts 5 wrong passwords for admin account
       for (let attempt = 1; attempt <= 5; attempt++) {
         const res = await request(app)
           .post("/api/auth/login")
-          .set("X-Forwarded-For", `10.0.0.${attempt}`)
-          .send({ email: testUserEmail, password: "wrong-password" });
+          .set("X-Forwarded-For", attackerIp)
+          .send({ email: testAdminEmail, password: "wrong-password" });
 
         expect(res.status).toBe(401);
-        expect(res.body.error).toBe("Invalid email or password");
       }
 
-      // 6th attempt even with correct password should be rejected with 429
-      const lockedRes = await request(app)
+      // Attacker's 6th attempt is blocked with 429
+      const attackerBlocked = await request(app)
         .post("/api/auth/login")
-        .set("X-Forwarded-For", "10.0.0.99")
-        .send({ email: testUserEmail, password: correctPassword });
+        .set("X-Forwarded-For", attackerIp)
+        .send({ email: testAdminEmail, password: "wrong-password" });
 
-      expect(lockedRes.status).toBe(429);
-      expect(lockedRes.body.error).toMatch(/temporarily locked/i);
-      expect(lockedRes.headers["retry-after"]).toBeDefined();
-      expect(Number(lockedRes.headers["retry-after"])).toBeGreaterThan(0);
+      expect(attackerBlocked.status).toBe(429);
+      expect(attackerBlocked.body.error).toMatch(/temporarily locked/i);
+      expect(attackerBlocked.headers["retry-after"]).toBeDefined();
+      expect(Number(attackerBlocked.headers["retry-after"])).toBeGreaterThan(0);
 
-      // Other accounts must NOT be affected
-      const otherRes = await request(app)
+      // CRITICAL: The real admin from their own IP can STILL log in successfully (NO Denial of Service!)
+      const adminLogin = await request(app)
         .post("/api/auth/login")
-        .set("X-Forwarded-For", "10.0.0.99")
-        .send({ email: testOtherEmail, password: correctPassword });
+        .set("X-Forwarded-For", adminIp)
+        .send({ email: testAdminEmail, password: correctPassword });
 
-      expect(otherRes.status).toBe(200);
-      expect(otherRes.body.token).toBeDefined();
+      expect(adminLogin.status).toBe(200);
+      expect(adminLogin.body.token).toBeDefined();
+      expect(adminLogin.body.user.email).toBe(testAdminEmail);
     });
 
-    it("resets failed attempt counter upon successful login", async () => {
-      // 3 failed logins
-      for (let i = 1; i <= 3; i++) {
-        await request(app)
-          .post("/api/auth/login")
-          .send({ email: testUserEmail, password: "wrong-password" });
-      }
+    it("resets failed count in database upon successful login", async () => {
+      const clientIp = "192.0.2.77";
 
-      // Successful login resets the counter
-      const successRes = await request(app)
-        .post("/api/auth/login")
-        .send({ email: testUserEmail, password: correctPassword });
-
-      expect(successRes.status).toBe(200);
-
-      // Now 4 more failed logins should NOT lock the account (since previous 3 were cleared)
+      // 4 failed attempts from clientIp
       for (let i = 1; i <= 4; i++) {
         const failRes = await request(app)
           .post("/api/auth/login")
+          .set("X-Forwarded-For", clientIp)
           .send({ email: testUserEmail, password: "wrong-password" });
         expect(failRes.status).toBe(401);
       }
 
-      // 5th failed login will now lock it
-      const fifthFail = await request(app)
+      // Successful login resets DB record
+      const successRes = await request(app)
         .post("/api/auth/login")
-        .send({ email: testUserEmail, password: "wrong-password" });
-      expect(fifthFail.status).toBe(401);
-
-      // Next attempt is 429 locked
-      const lockedRes = await request(app)
-        .post("/api/auth/login")
+        .set("X-Forwarded-For", clientIp)
         .send({ email: testUserEmail, password: correctPassword });
-      expect(lockedRes.status).toBe(429);
+      expect(successRes.status).toBe(200);
+
+      // Verify DB record was deleted
+      const record = await getPrisma().loginAttempt.findUnique({
+        where: { ip_email: { ip: clientIp, email: testUserEmail } },
+      });
+      expect(record).toBeNull();
+    });
+  });
+
+  describe("Classroom / Shared NAT Protection", () => {
+    it("allows multiple successful logins from the same NAT IP without hitting rate limits", async () => {
+      const sharedCampusIp = "161.200.1.5"; // Shared university NAT IP
+
+      // 25 students logging in successfully from the same campus Wi-Fi IP
+      for (let student = 1; student <= 25; student++) {
+        const res = await request(app)
+          .post("/api/auth/login")
+          .set("X-Forwarded-For", sharedCampusIp)
+          .send({ email: testUserEmail, password: correctPassword });
+
+        expect(res.status).toBe(200);
+        expect(res.body.token).toBeDefined();
+      }
+    });
+  });
+
+  describe("IP Flood Protection (Credential Spraying)", () => {
+    it("blocks an IP that generates excessive failures across different accounts", async () => {
+      const attackingIp = "198.51.100.99";
+
+      // Configure a lower test threshold for IP flood
+      setRateLimitConfig({ ipMaxFailed: 10 });
+
+      // Attacker tries 10 different accounts with wrong passwords
+      for (let i = 1; i <= 10; i++) {
+        const res = await request(app)
+          .post("/api/auth/login")
+          .set("X-Forwarded-For", attackingIp)
+          .send({ email: `victim-${i}@example.com`, password: "wrong-password" });
+        expect(res.status).toBe(401);
+      }
+
+      // 11th request from attackingIp is blocked by IP flood limit (429)
+      const floodBlocked = await request(app)
+        .post("/api/auth/login")
+        .set("X-Forwarded-For", attackingIp)
+        .send({ email: "victim-11@example.com", password: "wrong-password" });
+
+      expect(floodBlocked.status).toBe(429);
+      expect(floodBlocked.body.error).toMatch(/too many failed login attempts from this ip/i);
+    });
+  });
+
+  describe("PostgreSQL Persistence Verification", () => {
+    it("verifies login attempts and lockouts persist directly in PostgreSQL LoginAttempt table", async () => {
+      const testIp = "192.0.2.88";
+
+      // 5 failed attempts
+      for (let i = 1; i <= 5; i++) {
+        await request(app)
+          .post("/api/auth/login")
+          .set("X-Forwarded-For", testIp)
+          .send({ email: testUserEmail, password: "wrong-password" });
+      }
+
+      // Query database directly
+      const attemptInDb = await getPrisma().loginAttempt.findUnique({
+        where: { ip_email: { ip: testIp, email: testUserEmail } },
+      });
+
+      expect(attemptInDb).not.toBeNull();
+      expect(attemptInDb!.failedCount).toBe(5);
+      expect(attemptInDb!.lockedUntil).not.toBeNull();
+      expect(attemptInDb!.lockedUntil!.getTime()).toBeGreaterThan(Date.now());
     });
   });
 });

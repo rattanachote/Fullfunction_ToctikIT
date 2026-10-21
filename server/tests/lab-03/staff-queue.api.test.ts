@@ -15,7 +15,30 @@ describe("Staff Queue API", () => {
 
     // Clean up first to ensure idempotency
     const emails = ["queue.it@example.com", "queue.req@example.com"];
-    await getPrisma().ticket.deleteMany({ where: { ticketNo: { in: ["TKT-QUEUE-000001", "TKT-QUEUE-000002"] } } });
+    await getPrisma().attachmentBlob.deleteMany({
+      where: { attachment: { ticket: { requester: { email: { in: emails } } } } },
+    });
+    await getPrisma().attachment.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().actionTaken.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().publicComment.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().internalNote.deleteMany({
+      where: { ticket: { requester: { email: { in: emails } } } },
+    });
+    await getPrisma().ticket.deleteMany({
+      where: {
+        OR: [
+          { requester: { email: { in: emails } } },
+          { owner: { email: { in: emails } } },
+          { ticketNo: { in: ["TKT-QUEUE-000001", "TKT-QUEUE-000002"] } },
+        ],
+      },
+    });
     await getPrisma().user.deleteMany({ where: { email: { in: emails } } });
 
     // Create IT Staff

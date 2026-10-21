@@ -14,8 +14,7 @@ import {
   revokeUserSessions,
 } from "./auth.js";
 import {
-  loginIpRateLimiter,
-  checkAccountLockout,
+  checkLoginRateLimit,
   recordLoginFailure,
   recordLoginSuccess,
 } from "./rateLimit.js";
@@ -213,7 +212,7 @@ app.get("/api/ready", async (_req: Request, res: Response) => {
 });
 
 // 2. Auth Endpoints
-app.post("/api/auth/login", loginIpRateLimiter, checkAccountLockout, async (req: Request, res: Response) => {
+app.post("/api/auth/login", checkLoginRateLimit, async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password are required" });
@@ -225,14 +224,14 @@ app.post("/api/auth/login", loginIpRateLimiter, checkAccountLockout, async (req:
     if (!user) {
       // Equalize timing against missing-email enumeration
       verifyPassword(password, "00000000000000000000000000000000:" + "0".repeat(128));
-      recordLoginFailure(email);
+      await recordLoginFailure(req, email);
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
 
     const isValid = verifyPassword(password, user.passwordHash);
     if (!isValid) {
-      recordLoginFailure(email);
+      await recordLoginFailure(req, email);
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
@@ -242,7 +241,7 @@ app.post("/api/auth/login", loginIpRateLimiter, checkAccountLockout, async (req:
       return;
     }
 
-    recordLoginSuccess(email);
+    await recordLoginSuccess(req, email);
     const token = await createSession(user.id, user.email, user.name, user.role);
     res.status(200).json({
       token,

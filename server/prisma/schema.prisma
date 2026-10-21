@@ -130,3 +130,18 @@ model ActionTaken {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 }
+
+model LoginAttempt {
+  id          Int       @id @default(autoincrement())
+  ip          String
+  email       String
+  failedCount Int       @default(1)
+  lockedUntil DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([ip, email])
+  @@index([ip])
+  @@index([email])
+  @@index([lockedUntil])
+}
