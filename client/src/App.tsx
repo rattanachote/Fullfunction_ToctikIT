@@ -53,6 +53,23 @@ const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
   "Cancelled": ["Reopened"],
 };
 
+const DEFAULT_CATEGORIES: Category[] = [
+  { id: 1, name: "Hardware" },
+  { id: 2, name: "Software" },
+  { id: 3, name: "Network" },
+  { id: 4, name: "Access" },
+];
+
+const DEFAULT_SYSTEMS: RelatedSystem[] = [
+  { id: 1, name: "Email", isActive: true },
+  { id: 2, name: "Campus Wi-Fi", isActive: true },
+  { id: 3, name: "VPN", isActive: true },
+  { id: 4, name: "LEB2 App", isActive: true },
+  { id: 5, name: "Grade Submission App", isActive: true },
+  { id: 6, name: "Printer", isActive: true },
+  { id: 7, name: "Corporate Laptop", isActive: true },
+];
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>("login");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -225,9 +242,27 @@ export default function App() {
   const loadReferenceData = async () => {
     try {
       const cats = await fetchCategories();
-      if (Array.isArray(cats)) setCategories(cats);
+      if (Array.isArray(cats) && cats.length > 0) {
+        setCategories(cats);
+      } else {
+        setCategories(prev => (prev.length > 0 ? prev : DEFAULT_CATEGORIES));
+      }
+    } catch (_err) {
+      setCategories(prev => (prev.length > 0 ? prev : DEFAULT_CATEGORIES));
+    }
+
+    try {
       const sys = await fetchSystems();
-      if (Array.isArray(sys)) setSystems(sys);
+      if (Array.isArray(sys) && sys.length > 0) {
+        setSystems(sys);
+      } else {
+        setSystems(prev => (prev.length > 0 ? prev : DEFAULT_SYSTEMS));
+      }
+    } catch (_err) {
+      setSystems(prev => (prev.length > 0 ? prev : DEFAULT_SYSTEMS));
+    }
+
+    try {
       if (typeof fetchAdminUsers === "function") {
         const users = await fetchAdminUsers("", "ITStaff");
         const admins = await fetchAdminUsers("", "Administrator");
@@ -239,6 +274,12 @@ export default function App() {
       // Ignore reference loading error in restricted views
     }
   };
+
+  useEffect(() => {
+    if (screen === "create" && (categories.length === 0 || systems.length === 0)) {
+      loadReferenceData();
+    }
+  }, [screen, categories.length, systems.length]);
 
   // Fetch dashboard data
   const loadDashboardData = async () => {

@@ -333,12 +333,36 @@ app.get("/api/requesters", authenticate, requireRole(["ITStaff", "Administrator"
 });
 
 // 4. Categories & Systems Endpoints
+const DEFAULT_CATEGORIES = ["Account and Access", "Hardware", "Software", "Network"];
+const DEFAULT_SYSTEMS = [
+  "Email",
+  "Campus Wi-Fi",
+  "VPN",
+  "LEB2 App",
+  "Grade Submission App",
+  "Printer",
+  "Corporate Laptop",
+];
+
 app.get("/api/categories", async (_req: Request, res: Response) => {
   try {
-    const categories = await getPrisma().category.findMany({
+    let categories = await getPrisma().category.findMany({
       orderBy: { id: "asc" },
       select: { id: true, name: true },
     });
+    if (categories.length === 0) {
+      for (const name of DEFAULT_CATEGORIES) {
+        await getPrisma().category.upsert({
+          where: { name },
+          update: {},
+          create: { name },
+        });
+      }
+      categories = await getPrisma().category.findMany({
+        orderBy: { id: "asc" },
+        select: { id: true, name: true },
+      });
+    }
     res.status(200).json(categories);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch categories" });
@@ -347,10 +371,23 @@ app.get("/api/categories", async (_req: Request, res: Response) => {
 
 app.get("/api/systems", async (_req: Request, res: Response) => {
   try {
-    const systems = await getPrisma().relatedSystem.findMany({
+    let systems = await getPrisma().relatedSystem.findMany({
       where: { isActive: true },
       orderBy: { name: "asc" },
     });
+    if (systems.length === 0) {
+      for (const name of DEFAULT_SYSTEMS) {
+        await getPrisma().relatedSystem.upsert({
+          where: { name },
+          update: { isActive: true },
+          create: { name, isActive: true },
+        });
+      }
+      systems = await getPrisma().relatedSystem.findMany({
+        where: { isActive: true },
+        orderBy: { name: "asc" },
+      });
+    }
     res.status(200).json(systems);
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch related systems" });

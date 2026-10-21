@@ -4,10 +4,42 @@ import { hashPassword } from "../src/auth.js";
 async function main() {
   const prisma = getPrisma();
 
-  // Non-destructive guard: Seed only when User table is empty
+  // 1. Seed Categories (non-destructive — always ensure reference data exists)
+  const categories = ["Account and Access", "Hardware", "Software", "Network"];
+  const dbCategories: any[] = [];
+  for (const name of categories) {
+    const cat = await prisma.category.upsert({
+      where: { name },
+      update: {},
+      create: { name },
+    });
+    dbCategories.push(cat);
+  }
+  console.log("Seeded categories.");
+
+  // 2. Seed Related Systems (non-destructive — always ensure reference data exists)
+  const systems = [
+    "Email",
+    "Campus Wi-Fi",
+    "VPN",
+    "LEB2 App",
+    "Grade Submission App",
+    "Printer",
+    "Corporate Laptop",
+  ];
+  for (const name of systems) {
+    await prisma.relatedSystem.upsert({
+      where: { name },
+      update: { isActive: true },
+      create: { name, isActive: true },
+    });
+  }
+  console.log("Seeded related systems.");
+
+  // Non-destructive guard: Seed users/tickets only when User table is empty
   const existingUserCount = await prisma.user.count();
   if (existingUserCount > 0) {
-    console.log(`Database already contains ${existingUserCount} user(s). Skipping seed to preserve existing data.`);
+    console.log(`Database already contains ${existingUserCount} user(s). Skipping user/ticket seed to preserve existing data.`);
     return;
   }
 
@@ -32,38 +64,6 @@ async function main() {
   if (shouldSeedDemo && !demoPlainPassword) {
     throw new Error("DEMO_USER_PASSWORD or ADMIN_PASSWORD environment variable is required when SEED_DEMO_DATA=true in production.");
   }
-
-  // 1. Seed Categories (non-destructive)
-  const categories = ["Account and Access", "Hardware", "Software", "Network"];
-  const dbCategories: any[] = [];
-  for (const name of categories) {
-    const cat = await prisma.category.upsert({
-      where: { name },
-      update: {},
-      create: { name },
-    });
-    dbCategories.push(cat);
-  }
-  console.log("Seeded categories.");
-
-  // 2. Seed Related Systems (non-destructive)
-  const systems = [
-    "Email",
-    "Campus Wi-Fi",
-    "VPN",
-    "LEB2 App",
-    "Grade Submission App",
-    "Printer",
-    "Corporate Laptop",
-  ];
-  for (const name of systems) {
-    await prisma.relatedSystem.upsert({
-      where: { name },
-      update: {},
-      create: { name, isActive: true },
-    });
-  }
-  console.log("Seeded related systems.");
 
   const adminHash = hashPassword(adminPlainPassword);
 
