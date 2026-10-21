@@ -14,6 +14,7 @@ import {
   revokeUserSessions,
 } from "./auth.js";
 import {
+  validateLoginPayload,
   checkLoginRateLimit,
   recordLoginFailure,
   recordLoginSuccess,
@@ -212,7 +213,7 @@ app.get("/api/ready", async (_req: Request, res: Response) => {
 });
 
 // 2. Auth Endpoints
-app.post("/api/auth/login", checkLoginRateLimit, async (req: Request, res: Response) => {
+app.post("/api/auth/login", validateLoginPayload, checkLoginRateLimit, async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password are required" });

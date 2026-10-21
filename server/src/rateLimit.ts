@@ -44,6 +44,33 @@ export function normalizeAccountKey(email: unknown): string {
 }
 
 /**
+ * Middleware: Strictly validate login payload format before rate limiting or credentials check.
+ * Email and password must be non-empty strings, with email length <= 254.
+ */
+export function validateLoginPayload(req: Request, res: Response, next: NextFunction): void {
+  const { email, password } = req.body || {};
+
+  if (typeof email !== "string" || typeof password !== "string") {
+    res.status(400).json({ error: "Email and password must be strings" });
+    return;
+  }
+
+  const trimmedEmail = email.trim();
+  if (trimmedEmail.length === 0 || password.length === 0) {
+    res.status(400).json({ error: "Email and password cannot be empty" });
+    return;
+  }
+
+  if (trimmedEmail.length > 254) {
+    res.status(400).json({ error: "Email cannot exceed 254 characters" });
+    return;
+  }
+
+  req.body.email = trimmedEmail.toLowerCase();
+  next();
+}
+
+/**
  * Middleware: Check if the (IP, Email) pair or the IP itself is currently locked out
  */
 export async function checkLoginRateLimit(req: Request, res: Response, next: NextFunction): Promise<void> {
@@ -51,7 +78,7 @@ export async function checkLoginRateLimit(req: Request, res: Response, next: Nex
   const email = normalizeAccountKey(req.body?.email);
 
   if (!email) {
-    // Missing email handled downstream (400 Bad Request)
+    // Missing email handled downstream or by validateLoginPayload
     next();
     return;
   }
@@ -110,7 +137,8 @@ export async function checkLoginRateLimit(req: Request, res: Response, next: Nex
 }
 
 /**
- * Record a failed login attempt in PostgreSQL
+ * Record a failed login attempt atomically in PostgreSQL
+ * Uses INSERT ... ON CONFLICT DO UPDATE ... RETURNING to guarantee atomic increments under high concurrency.
  */
 export async function recordLoginFailure(
   req: Request,
@@ -123,48 +151,44 @@ export async function recordLoginFailure(
   const prisma = getPrisma();
   const now = new Date();
   const windowStart = new Date(now.getTime() - currentConfig.accountWindowMs);
+  const lockUntilDate = new Date(now.getTime() + currentConfig.accountLockoutMs);
 
-  try {
-    const existing = await prisma.loginAttempt.findUnique({
-      where: { ip_email: { ip, email } },
-    });
+  const maxRetries = 2;
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const rows = await prisma.$queryRaw<Array<{ failedCount: number; lockedUntil: Date | null }>>`
+        INSERT INTO "LoginAttempt" ("ip", "email", "failedCount", "lockedUntil", "createdAt", "updatedAt")
+        VALUES (${ip}, ${email}, 1, NULL, ${now}, ${now})
+        ON CONFLICT ("ip", "email") DO UPDATE SET
+          "failedCount" = CASE
+            WHEN "LoginAttempt"."updatedAt" < ${windowStart} THEN 1
+            ELSE "LoginAttempt"."failedCount" + 1
+          END,
+          "lockedUntil" = CASE
+            WHEN ("LoginAttempt"."updatedAt" < ${windowStart} AND 1 >= ${currentConfig.accountMaxFailed})
+              OR ("LoginAttempt"."updatedAt" >= ${windowStart} AND "LoginAttempt"."failedCount" + 1 >= ${currentConfig.accountMaxFailed})
+            THEN ${lockUntilDate}
+            ELSE "LoginAttempt"."lockedUntil"
+          END,
+          "updatedAt" = ${now}
+        RETURNING "failedCount", "lockedUntil"
+      `;
 
-    let newCount = 1;
-    let lockedUntil: Date | null = null;
-
-    if (existing) {
-      if (existing.updatedAt >= windowStart) {
-        newCount = existing.failedCount + 1;
-      } else {
-        newCount = 1;
+      if (rows && rows.length > 0) {
+        const count = rows[0].failedCount;
+        const isLocked = count >= currentConfig.accountMaxFailed;
+        const retryAfter = isLocked ? Math.ceil(currentConfig.accountLockoutMs / 1000) : 0;
+        return { failedCount: count, isLocked, retryAfter };
+      }
+      break;
+    } catch (error: any) {
+      if (attempt === maxRetries) {
+        console.error("Atomic recordLoginFailure error:", error);
       }
     }
-
-    const isLocked = newCount >= currentConfig.accountMaxFailed;
-    if (isLocked) {
-      lockedUntil = new Date(now.getTime() + currentConfig.accountLockoutMs);
-    }
-
-    await prisma.loginAttempt.upsert({
-      where: { ip_email: { ip, email } },
-      create: {
-        ip,
-        email,
-        failedCount: newCount,
-        lockedUntil,
-      },
-      update: {
-        failedCount: newCount,
-        lockedUntil,
-      },
-    });
-
-    const retryAfter = isLocked ? Math.ceil(currentConfig.accountLockoutMs / 1000) : 0;
-    return { failedCount: newCount, isLocked, retryAfter };
-  } catch (error) {
-    console.error("Failed to record login failure:", error);
-    return { failedCount: 0, isLocked: false, retryAfter: 0 };
   }
+
+  return { failedCount: 0, isLocked: false, retryAfter: 0 };
 }
 
 /**

@@ -121,6 +121,32 @@ describe("Authentication API", () => {
     }
   });
 
+  it("rejects x-requester-id with 401 across all authenticated endpoints when ALLOW_LEGACY_REQUESTER_HEADER is unset (undefined)", async () => {
+    const prev = process.env.ALLOW_LEGACY_REQUESTER_HEADER;
+    delete process.env.ALLOW_LEGACY_REQUESTER_HEADER;
+
+    try {
+      const endpoints = [
+        { method: "get" as const, path: "/api/auth/me" },
+        { method: "get" as const, path: "/api/requesters" },
+        { method: "get" as const, path: "/api/tickets" },
+        { method: "post" as const, path: "/api/tickets" },
+        { method: "get" as const, path: "/api/tickets/1" },
+        { method: "get" as const, path: "/api/attachments/1" },
+        { method: "get" as const, path: "/api/dashboard/requester" },
+        { method: "get" as const, path: "/api/dashboard/staff" },
+        { method: "get" as const, path: "/api/admin/users" },
+      ];
+
+      for (const ep of endpoints) {
+        const res = await request(app)[ep.method](ep.path).set("x-requester-id", "1");
+        expect(res.status).toBe(401);
+      }
+    } finally {
+      process.env.ALLOW_LEGACY_REQUESTER_HEADER = prev;
+    }
+  });
+
   it("does not reveal inactive account status (returns 401, not 403) when login password is wrong", async () => {
     const inactiveEmail = "inactive.enum@example.com";
     await getPrisma().user.deleteMany({ where: { email: inactiveEmail } });
