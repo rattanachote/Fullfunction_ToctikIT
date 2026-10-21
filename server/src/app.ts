@@ -13,12 +13,19 @@ import {
   destroySession,
   revokeUserSessions,
 } from "./auth.js";
+import {
+  loginIpRateLimiter,
+  checkAccountLockout,
+  recordLoginFailure,
+  recordLoginSuccess,
+} from "./rateLimit.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export const app = express();
 app.disable("x-powered-by");
+app.set("trust proxy", 1);
 
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
@@ -206,7 +213,7 @@ app.get("/api/ready", async (_req: Request, res: Response) => {
 });
 
 // 2. Auth Endpoints
-app.post("/api/auth/login", async (req: Request, res: Response) => {
+app.post("/api/auth/login", loginIpRateLimiter, checkAccountLockout, async (req: Request, res: Response) => {
   const { email, password } = req.body;
   if (!email || !password) {
     res.status(400).json({ error: "Email and password are required" });
@@ -218,12 +225,14 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
     if (!user) {
       // Equalize timing against missing-email enumeration
       verifyPassword(password, "00000000000000000000000000000000:" + "0".repeat(128));
+      recordLoginFailure(email);
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
 
     const isValid = verifyPassword(password, user.passwordHash);
     if (!isValid) {
+      recordLoginFailure(email);
       res.status(401).json({ error: "Invalid email or password" });
       return;
     }
@@ -233,6 +242,7 @@ app.post("/api/auth/login", async (req: Request, res: Response) => {
       return;
     }
 
+    recordLoginSuccess(email);
     const token = await createSession(user.id, user.email, user.name, user.role);
     res.status(200).json({
       token,

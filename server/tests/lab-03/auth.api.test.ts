@@ -1,13 +1,18 @@
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, beforeEach } from "vitest";
 import request from "supertest";
 import { app } from "../../src/app.js";
 import { getPrisma } from "../../src/prisma.js";
 import { hashPassword } from "../../src/auth.js";
+import { resetLoginRateLimits } from "../../src/rateLimit.js";
 
 describe("Authentication API", () => {
   const email = "auth.test@example.com";
   const password = "Password123!";
   let token = "";
+
+  beforeEach(() => {
+    resetLoginRateLimits();
+  });
 
   beforeAll(async () => {
     // Ensure clean test user
